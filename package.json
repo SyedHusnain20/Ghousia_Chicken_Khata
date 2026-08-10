@@ -1,0 +1,20 @@
+{
+  "name": "khata-app",
+  "version": "0.1.0",
+  "description": "Local khata (ledger) software for a chicken shop - supplier & customer due tracking",
+  "private": true,
+  "main": "dist/main/index.js",
+  "scripts": {
+    "test:scenario": "ts-node test/scenario.ts",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.0.3"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^20.14.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.5.0"
+  }
+}
