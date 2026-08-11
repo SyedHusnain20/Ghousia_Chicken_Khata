@@ -10,6 +10,7 @@ export const IpcChannels = {
   ENTRY_LIST_UNBILLED: 'entry:list-unbilled',
   BILL_GENERATE: 'bill:generate',
   PAYMENT_RECORD: 'payment:record',
+  PAYMENT_LIST: 'payment:list',
   DAILY_LEDGER_CREATE: 'daily-ledger:create',
   DAILY_LEDGER_GET: 'daily-ledger:get',
   DAILY_LEDGER_UPDATE_FIELDS: 'daily-ledger:update-fields',
@@ -61,6 +62,11 @@ export interface RecordPaymentRequest {
   note?: string | null;
 }
 
+export interface ListPaymentsRequest {
+  partyType: PartyType;
+  partyId: number;
+}
+
 export interface CreateDailyLedgerRequest {
   ledgerDate: string; // 'YYYY-MM-DD'
 }
@@ -106,6 +112,7 @@ export interface KhataApi {
   listUnbilledEntries(req: ListUnbilledEntriesRequest): Promise<Entry[]>;
   generateBill(req: GenerateBillRequest): Promise<Bill>;
   recordPayment(req: RecordPaymentRequest): Promise<Payment>;
+  listPayments(req: ListPaymentsRequest): Promise<Payment[]>;
   createDailyLedger(req: CreateDailyLedgerRequest): Promise<DailyLedger>;
   getDailyLedger(req: GetDailyLedgerRequest): Promise<DailyLedgerDetail>;
   updateDailyLedgerFields(req: UpdateDailyLedgerFieldsRequest): Promise<DailyLedger>;

@@ -9,6 +9,7 @@ import type {
   ListUnbilledEntriesRequest,
   GenerateBillRequest,
   RecordPaymentRequest,
+  ListPaymentsRequest,
   CreateDailyLedgerRequest,
   GetDailyLedgerRequest,
   UpdateDailyLedgerFieldsRequest,
@@ -23,6 +24,7 @@ import {
   getUnbilledEntries,
   generateBill,
   recordPayment,
+  getPayments,
 } from './services/partyService';
 import {
   createDailyLedger,
@@ -69,6 +71,10 @@ export function registerIpcHandlers(db: Database.Database): void {
 
   ipcMain.handle(IpcChannels.PAYMENT_RECORD, (_event, req: RecordPaymentRequest) => {
     return recordPayment(db, req.partyType, req.partyId, req.amount, req.billId ?? null, req.note ?? null);
+  });
+
+  ipcMain.handle(IpcChannels.PAYMENT_LIST, (_event, req: ListPaymentsRequest) => {
+    return getPayments(db, req.partyType, req.partyId);
   });
 
   ipcMain.handle(IpcChannels.DAILY_LEDGER_CREATE, (_event, req: CreateDailyLedgerRequest) => {

@@ -197,6 +197,21 @@ export function recordPayment(
   return run();
 }
 
+/**
+ * Full payment history for a party, most recent first - backs the
+ * "Payment history" list on the Supplier/Customer profile screen. Includes
+ * both standalone payments (bill_id NULL) and payments recorded at bill
+ * generation time (bill_id set), since both are logged into the same
+ * `payments` table (spec section 21).
+ */
+export function getPayments(db: Database.Database, partyType: PartyType, partyId: number): Payment[] {
+  return db
+    .prepare(
+      `SELECT * FROM payments WHERE party_type = ? AND party_id = ? ORDER BY paid_at DESC, id DESC`
+    )
+    .all(partyType, partyId) as Payment[];
+}
+
 export function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }

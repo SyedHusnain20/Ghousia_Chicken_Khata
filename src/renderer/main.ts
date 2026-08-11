@@ -1,22 +1,61 @@
-// Smoke test only: proves preload -> ipcMain -> better-sqlite3 -> back to
-// the renderer works end-to-end before any real UI is built on top of it
-// in Phase 3. window.khata is typed via global.d.ts, no `any` needed.
+import { buildShell } from './layout';
+import { route, setNotFound, startRouter } from './router';
+import { renderDashboard } from './views/dashboard';
+import { renderPartyList } from './views/partyList';
+import { renderPartyProfile } from './views/partyProfile';
+import { renderPlaceholder } from './views/placeholder';
 
-async function checkConnection(): Promise<void> {
-  const statusEl = document.getElementById('status');
-  if (!statusEl) return;
-
-  try {
-    const suppliers = await window.khata.listParties({ partyType: 'supplier' });
-    const customers = await window.khata.listParties({ partyType: 'customer' });
-    statusEl.textContent =
-      `Connected. ${suppliers.length} supplier(s), ${customers.length} customer(s) in the database.`;
-    statusEl.classList.add('ok');
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    statusEl.textContent = 'Could not reach the local database: ' + message;
-    statusEl.classList.add('err');
-  }
+const root = document.getElementById('app');
+if (!root) {
+  throw new Error('#app root element is missing from index.html');
 }
 
-checkConnection();
+const content = buildShell(root);
+
+route('/', (_params, el) => {
+  renderDashboard(el);
+});
+
+route('/suppliers', (_params, el) => {
+  renderPartyList('supplier', el);
+});
+
+route('/suppliers/:id', (params, el) => {
+  const id = Number(params.id);
+  if (!Number.isInteger(id)) {
+    renderPlaceholder(el, 'Supplier not found', 'That supplier link doesn\u2019t look right.');
+    return;
+  }
+  renderPartyProfile('supplier', id, el);
+});
+
+route('/customers', (_params, el) => {
+  renderPartyList('customer', el);
+});
+
+route('/customers/:id', (params, el) => {
+  const id = Number(params.id);
+  if (!Number.isInteger(id)) {
+    renderPlaceholder(el, 'Customer not found', 'That customer link doesn\u2019t look right.');
+    return;
+  }
+  renderPartyProfile('customer', id, el);
+});
+
+route('/ledger', (_params, el) => {
+  renderPlaceholder(el, 'Daily Ledger', 'The Daily Ledger screen is built in the next step of this project.');
+});
+
+route('/bills', (_params, el) => {
+  renderPlaceholder(el, 'Bills', 'Bill generation and printing is built in the next step of this project.');
+});
+
+route('/settings', (_params, el) => {
+  renderPlaceholder(el, 'Settings / Backup', 'Backup and restore tools are built in a later step of this project.');
+});
+
+setNotFound((_params, el) => {
+  renderPlaceholder(el, 'Not found', 'That page doesn\u2019t exist.');
+});
+
+startRouter(content);
