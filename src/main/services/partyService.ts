@@ -32,10 +32,21 @@ export function getParty(db: Database.Database, partyType: PartyType, partyId: n
   return party;
 }
 
+export function getAllParties(db: Database.Database, partyType: PartyType): Party[] {
+  const t = tables(partyType);
+  return db.prepare(`SELECT * FROM ${t.party} ORDER BY name COLLATE NOCASE`).all() as Party[];
+}
+
+export const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
 /**
  * Log a single purchase/sale entry against a party. No bill is created and
  * no due is touched here - the entry just sits "unbilled" until it's swept
  * into a generated bill.
+ *
+ * entryDate is optional and lets the shopkeeper backdate an entry (e.g.
+ * logging Monday's purchase on Wednesday) so it lands in the correct
+ * Daily Ledger date. Expects 'YYYY-MM-DD'; defaults to right now.
  */
 export function addEntry(
   db: Database.Database,
@@ -43,10 +54,34 @@ export function addEntry(
   partyId: number,
   itemName: string,
   weightKg: number,
-  ratePerKg: number
+  ratePerKg: number,
+  entryDate?: string
 ): number {
+  if (!Number.isFinite(weightKg) || weightKg <= 0) {
+    throw new Error('Weight (KG) must be a number greater than zero');
+  }
+  if (!Number.isFinite(ratePerKg) || ratePerKg <= 0) {
+    throw new Error('Rate per KG must be a number greater than zero');
+  }
+  if (entryDate !== undefined && !DATE_ONLY_RE.test(entryDate)) {
+    throw new Error("entryDate must be in 'YYYY-MM-DD' format");
+  }
+
   const t = tables(partyType);
   const lineTotal = round2(weightKg * ratePerKg);
+
+  if (entryDate) {
+    // Midday timestamp keeps this entry sorting sensibly alongside
+    // same-day entries that used the default "now" timestamp, without
+    // implying a specific time of day that wasn't actually recorded.
+    const stmt = db.prepare(
+      `INSERT INTO ${t.entries} (${t.fk}, entry_date, item_name, weight_kg, rate_per_kg, line_total)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    );
+    const result = stmt.run(partyId, `${entryDate} 12:00:00`, itemName, weightKg, ratePerKg, lineTotal);
+    return result.lastInsertRowid as number;
+  }
+
   const stmt = db.prepare(
     `INSERT INTO ${t.entries} (${t.fk}, item_name, weight_kg, rate_per_kg, line_total) VALUES (?, ?, ?, ?, ?)`
   );
@@ -162,6 +197,6 @@ export function recordPayment(
   return run();
 }
 
-function round2(n: number): number {
+export function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }

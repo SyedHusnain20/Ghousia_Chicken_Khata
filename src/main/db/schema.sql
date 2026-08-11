@@ -80,3 +80,24 @@ CREATE INDEX IF NOT EXISTS idx_supplier_entries_unbilled
   ON supplier_entries (supplier_id) WHERE bill_id IS NULL;
 CREATE INDEX IF NOT EXISTS idx_customer_entries_unbilled
   ON customer_entries (customer_id) WHERE bill_id IS NULL;
+
+-- Daily Ledger: one row per business date, created explicitly by the
+-- shopkeeper (UNIQUE constraint makes accidental duplicates for the same
+-- date structurally impossible). Only holds the two genuinely manual
+-- fields - Cash Customers and Extra Expenses. Supplier purchases and Khata
+-- customer sales are NOT duplicated here; they're aggregated live from
+-- supplier_entries/customer_entries by date, so there is exactly one
+-- source of truth for every transaction.
+CREATE TABLE IF NOT EXISTS daily_ledgers (
+  id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+  ledger_date          TEXT NOT NULL UNIQUE,   -- 'YYYY-MM-DD'
+  cash_customer_income REAL NOT NULL DEFAULT 0,
+  extra_expenses       REAL NOT NULL DEFAULT 0,
+  created_at           TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at           TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Needed to aggregate supplier/customer entries by calendar date
+-- efficiently once the entries table has months of history in it.
+CREATE INDEX IF NOT EXISTS idx_supplier_entries_date ON supplier_entries (entry_date);
+CREATE INDEX IF NOT EXISTS idx_customer_entries_date ON customer_entries (entry_date);

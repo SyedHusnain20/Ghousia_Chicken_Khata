@@ -1,0 +1,23 @@
+import { contextBridge, ipcRenderer } from 'electron';
+import { IpcChannels, KhataApi } from '../shared/ipc';
+
+// This is the ONLY thing the renderer can touch. No direct ipcRenderer
+// access, no Node globals - just these seven functions, each mapped to one
+// channel. If Phase 3's UI needs something new, it gets added here
+// explicitly rather than the renderer reaching for a broader API.
+const khataApi: KhataApi = {
+  createParty: (req) => ipcRenderer.invoke(IpcChannels.PARTY_CREATE, req),
+  getParty: (req) => ipcRenderer.invoke(IpcChannels.PARTY_GET, req),
+  listParties: (req) => ipcRenderer.invoke(IpcChannels.PARTY_LIST, req),
+  addEntry: (req) => ipcRenderer.invoke(IpcChannels.ENTRY_ADD, req),
+  listUnbilledEntries: (req) => ipcRenderer.invoke(IpcChannels.ENTRY_LIST_UNBILLED, req),
+  generateBill: (req) => ipcRenderer.invoke(IpcChannels.BILL_GENERATE, req),
+  recordPayment: (req) => ipcRenderer.invoke(IpcChannels.PAYMENT_RECORD, req),
+  createDailyLedger: (req) => ipcRenderer.invoke(IpcChannels.DAILY_LEDGER_CREATE, req),
+  getDailyLedger: (req) => ipcRenderer.invoke(IpcChannels.DAILY_LEDGER_GET, req),
+  updateDailyLedgerFields: (req) => ipcRenderer.invoke(IpcChannels.DAILY_LEDGER_UPDATE_FIELDS, req),
+  listDailyLedgers: (req) => ipcRenderer.invoke(IpcChannels.DAILY_LEDGER_LIST, req),
+  getMonthlySummary: (req) => ipcRenderer.invoke(IpcChannels.DAILY_LEDGER_MONTHLY_SUMMARY, req),
+};
+
+contextBridge.exposeInMainWorld('khata', khataApi);

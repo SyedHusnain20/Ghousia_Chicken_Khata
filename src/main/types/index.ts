@@ -38,3 +38,43 @@ export interface Payment {
   paid_at: string;
   note: string | null;
 }
+
+// An entry with its party's name attached - used for daily ledger line
+// items, where "Ali - 70kg x 380" needs to be shown without a separate
+// lookup per row.
+export interface EntryWithPartyName extends Entry {
+  party_id: number;
+  party_name: string;
+}
+
+export interface DailyLedger {
+  id: number;
+  ledger_date: string; // 'YYYY-MM-DD'
+  cash_customer_income: number;
+  extra_expenses: number;
+  created_at: string;
+  updated_at: string;
+}
+
+// The full view shown on the Daily Ledger page: the manual fields plus
+// everything derived live from supplier_entries/customer_entries for that
+// date. supplier_purchases_total and khata_sales_total are NEVER stored -
+// they're always recomputed from the entries so there's no way for them to
+// drift out of sync with the Supplier/Customer modules.
+export interface DailyLedgerDetail extends DailyLedger {
+  supplier_purchases: EntryWithPartyName[];
+  khata_sales: EntryWithPartyName[];
+  supplier_purchases_total: number;
+  khata_sales_total: number;
+  total_income: number;
+  total_expenses: number;
+  profit_loss: number;
+}
+
+// One row in the Daily Ledger history list / monthly summary.
+export interface DailyLedgerSummary {
+  ledger_date: string;
+  total_income: number;
+  total_expenses: number;
+  profit_loss: number;
+}

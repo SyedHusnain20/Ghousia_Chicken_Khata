@@ -1,0 +1,17 @@
+body {
+  font-family: sans-serif;
+  padding: 2rem;
+  color: #222;
+}
+
+#status {
+  font-weight: bold;
+}
+
+#status.ok {
+  color: #1a7f37;
+}
+
+#status.err {
+  color: #c0392b;
+}
