@@ -1,7 +1,8 @@
 import { el, mount } from '../dom';
 import { formatDue, formatRs, formatDateTime, todayIso } from '../format';
 import { emptyState, errorBanner, errorMessage, loadingState } from '../components';
-import type { Entry, Party, PartyType, Payment } from '../../main/types';
+import { navigate } from '../router';
+import type { BillListItem, Entry, Party, PartyType, Payment } from '../../main/types';
 
 const COPY: Record<
   PartyType,
@@ -220,6 +221,107 @@ function paymentsTable(payments: Payment[]): HTMLElement {
   ]);
 }
 
+function billsTable(bills: BillListItem[], partyType: PartyType): HTMLElement {
+  if (bills.length === 0) {
+    return emptyState('No bills generated yet.');
+  }
+  const rows = bills.map((bill) => {
+    const row = el('tr', { class: 'clickable-row', tabindex: '0' }, [
+      el('td', {}, [formatDateTime(bill.bill_date)]),
+      el('td', {}, [`#${bill.id}`]),
+      el('td', { class: 'cell-number' }, [formatRs(bill.subtotal)]),
+      el('td', { class: 'cell-number cell-strong' }, [formatRs(bill.remaining_due)]),
+    ]);
+    const go = () => navigate(`/bills/${partyType}/${bill.id}`);
+    row.addEventListener('click', go);
+    row.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') go();
+    });
+    return row;
+  });
+  return el('table', { class: 'data-table' }, [
+    el('thead', {}, [
+      el('tr', {}, [
+        el('th', {}, ['Date']),
+        el('th', {}, ['Bill']),
+        el('th', { class: 'th-right' }, ['Subtotal']),
+        el('th', { class: 'th-right' }, ['Remaining due']),
+      ]),
+    ]),
+    el('tbody', {}, rows),
+  ]);
+}
+
+// The Generate Bill panel: shows a preview of what the bill will contain
+// (built entirely from data already on the page - no extra fetch needed),
+// an optional payment-now field, and generates + navigates straight to the
+// printable bill on success.
+function generateBillPanel(
+  partyType: PartyType,
+  partyId: number,
+  entries: Entry[],
+  currentDue: number
+): HTMLElement {
+  if (entries.length === 0) {
+    return el('p', { class: 'field-hint' }, [
+      'There are no unbilled entries yet, so there\u2019s nothing to put on a bill.',
+    ]);
+  }
+
+  const subtotal = entries.reduce((sum, e) => sum + e.line_total, 0);
+  const grandTotal = Math.round((currentDue + subtotal) * 100) / 100;
+
+  const paymentInput = el('input', { type: 'number', step: '0.01', min: '0', placeholder: '0 (optional)' }) as HTMLInputElement;
+  const errorSlot = el('div', { class: 'form-error-slot' });
+
+  const form = el('form', { class: 'inline-form' }, [
+    el('div', { class: 'bill-preview' }, [
+      el('div', { class: 'bill-preview-row' }, [
+        el('span', {}, [`${entries.length} unbilled entr${entries.length === 1 ? 'y' : 'ies'}`]),
+        el('span', {}, [formatRs(subtotal)]),
+      ]),
+      el('div', { class: 'bill-preview-row' }, [el('span', {}, ['Previous due']), el('span', {}, [formatRs(currentDue)])]),
+      el('div', { class: 'bill-preview-row bill-preview-grand' }, [
+        el('span', {}, ['Grand total']),
+        el('span', {}, [formatRs(grandTotal)]),
+      ]),
+    ]),
+    el('label', {}, ['Payment now (optional, Rs.)', paymentInput]),
+    errorSlot,
+    el('div', { class: 'form-actions' }, [
+      el('button', { class: 'btn btn-primary', type: 'submit' }, ['Generate Bill']),
+    ]),
+  ]);
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    errorSlot.replaceChildren();
+
+    const raw = paymentInput.value.trim();
+    const paymentNow = raw === '' ? 0 : Number(raw);
+    if (!Number.isFinite(paymentNow) || paymentNow < 0) {
+      errorSlot.append(errorBanner('Payment now must be zero or a positive number.'));
+      return;
+    }
+    if (paymentNow > grandTotal) {
+      errorSlot.append(errorBanner(`Payment now can\u2019t exceed the grand total of ${formatRs(grandTotal)}.`));
+      return;
+    }
+
+    const submitBtn = form.querySelector('button[type="submit"]') as HTMLButtonElement;
+    submitBtn.disabled = true;
+    try {
+      const bill = await window.khata.generateBill({ partyType, partyId, paymentNow });
+      navigate(`/bills/${partyType}/${bill.id}`);
+    } catch (err) {
+      errorSlot.replaceChildren(errorBanner(errorMessage(err)));
+      submitBtn.disabled = false;
+    }
+  });
+
+  return form;
+}
+
 export async function renderPartyProfile(
   partyType: PartyType,
   partyId: number,
@@ -230,11 +332,13 @@ export async function renderPartyProfile(
   let party: Party;
   let entries: Entry[];
   let payments: Payment[];
+  let bills: BillListItem[];
   try {
-    [party, entries, payments] = await Promise.all([
+    [party, entries, payments, bills] = await Promise.all([
       window.khata.getParty({ partyType, partyId }),
       window.khata.listUnbilledEntries({ partyType, partyId }),
       window.khata.listPayments({ partyType, partyId }),
+      window.khata.listBillsForParty({ partyType, partyId }),
     ]);
   } catch (err) {
     mount(container, backLink(partyType), errorBanner(errorMessage(err)));
@@ -244,64 +348,50 @@ export async function renderPartyProfile(
   const copy = COPY[partyType];
   const entriesWrap = el('div', {});
   const paymentsWrap = el('div', {});
+  const billsWrap = el('div', {});
   const heroWrap = el('div', {});
+  const generateBillWrap = el('div', {});
+  const entryFormWrap = el('div', {});
+  const paymentFormWrap = el('div', {});
 
   function refreshStatic() {
     mount(heroWrap, dueHero(party, partyType));
     mount(entriesWrap, entriesTable(entries));
     mount(paymentsWrap, paymentsTable(payments));
+    mount(billsWrap, billsTable(bills, partyType));
+    mount(generateBillWrap, generateBillPanel(partyType, partyId, entries, party.current_due));
   }
 
   async function reload() {
-    [party, entries, payments] = await Promise.all([
+    [party, entries, payments, bills] = await Promise.all([
       window.khata.getParty({ partyType, partyId }),
       window.khata.listUnbilledEntries({ partyType, partyId }),
       window.khata.listPayments({ partyType, partyId }),
+      window.khata.listBillsForParty({ partyType, partyId }),
     ]);
     refreshStatic();
+    // Forms read party.current_due / entries at build time, so they're
+    // rebuilt fresh on every reload rather than mutated in place.
+    paymentFormWrap.replaceChildren(paymentForm(partyType, partyId, party.current_due, reload));
+    entryFormWrap.replaceChildren(addEntryForm(partyType, partyId, reload));
   }
 
-  const entryFormWrap = el('div', {}, [addEntryForm(partyType, partyId, reload)]);
-  const paymentFormWrap = el('div', {}, [paymentForm(partyType, partyId, party.current_due, reload)]);
-
-  // Payment form needs the latest current_due each time the profile
-  // changes, so it's rebuilt on reload rather than mutated in place.
-  const originalReload = reload;
-  async function reloadAndRebuildPaymentForm() {
-    await originalReload();
-    paymentFormWrap.replaceChildren(paymentForm(partyType, partyId, party.current_due, reloadAndRebuildPaymentForm));
-  }
-  paymentFormWrap.replaceChildren(paymentForm(partyType, partyId, party.current_due, reloadAndRebuildPaymentForm));
-  entryFormWrap.replaceChildren(addEntryForm(partyType, partyId, reloadAndRebuildPaymentForm));
+  paymentFormWrap.replaceChildren(paymentForm(partyType, partyId, party.current_due, reload));
+  entryFormWrap.replaceChildren(addEntryForm(partyType, partyId, reload));
 
   refreshStatic();
-
-  const generateBillNote = el('p', { class: 'field-hint' }, [
-    'Generating a bill for these unbilled entries is coming in the next step.',
-  ]);
 
   mount(
     container,
     backLink(partyType),
     heroWrap,
     el('div', { class: 'profile-columns' }, [
-      el('section', { class: 'panel' }, [
-        el('h2', {}, [copy.entryVerb]),
-        entryFormWrap,
-      ]),
-      el('section', { class: 'panel' }, [
-        el('h2', {}, ['Make a Payment']),
-        paymentFormWrap,
-      ]),
+      el('section', { class: 'panel' }, [el('h2', {}, [copy.entryVerb]), entryFormWrap]),
+      el('section', { class: 'panel' }, [el('h2', {}, ['Make a Payment']), paymentFormWrap]),
     ]),
-    el('section', { class: 'panel' }, [
-      el('div', { class: 'panel-header-row' }, [
-        el('h2', {}, [copy.addEntryLabel]),
-        el('span', { class: 'bill-btn-disabled', title: 'Coming soon' }, ['Generate Bill \u2192']),
-      ]),
-      generateBillNote,
-      entriesWrap,
-    ]),
+    el('section', { class: 'panel' }, [el('h2', {}, [copy.addEntryLabel]), entriesWrap]),
+    el('section', { class: 'panel' }, [el('h2', {}, ['Generate Bill']), generateBillWrap]),
+    el('section', { class: 'panel' }, [el('h2', {}, ['Bill History']), billsWrap]),
     el('section', { class: 'panel' }, [el('h2', {}, ['Payment History']), paymentsWrap])
   );
 }

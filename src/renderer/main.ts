@@ -3,6 +3,8 @@ import { route, setNotFound, startRouter } from './router';
 import { renderDashboard } from './views/dashboard';
 import { renderPartyList } from './views/partyList';
 import { renderPartyProfile } from './views/partyProfile';
+import { renderBillDetail } from './views/billDetail';
+import { renderBillsList } from './views/billsList';
 import { renderPlaceholder } from './views/placeholder';
 
 const root = document.getElementById('app');
@@ -47,7 +49,17 @@ route('/ledger', (_params, el) => {
 });
 
 route('/bills', (_params, el) => {
-  renderPlaceholder(el, 'Bills', 'Bill generation and printing is built in the next step of this project.');
+  renderBillsList(el);
+});
+
+route('/bills/:partyType/:id', (params, el) => {
+  const id = Number(params.id);
+  const partyType = params.partyType;
+  if (!Number.isInteger(id) || (partyType !== 'supplier' && partyType !== 'customer')) {
+    renderPlaceholder(el, 'Bill not found', 'That bill link doesn\u2019t look right.');
+    return;
+  }
+  renderBillDetail(partyType, id, el);
 });
 
 route('/settings', (_params, el) => {

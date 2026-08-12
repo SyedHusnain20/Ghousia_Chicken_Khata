@@ -1,4 +1,15 @@
-import { PartyType, Party, Entry, Bill, Payment, DailyLedger, DailyLedgerDetail, DailyLedgerSummary } from '../main/types';
+import {
+  PartyType,
+  Party,
+  Entry,
+  Bill,
+  BillListItem,
+  BillDetail,
+  Payment,
+  DailyLedger,
+  DailyLedgerDetail,
+  DailyLedgerSummary,
+} from '../main/types';
 
 // Centralized channel names so main and preload never drift out of sync
 // (a typo here fails loudly at compile time instead of silently at runtime).
@@ -9,6 +20,9 @@ export const IpcChannels = {
   ENTRY_ADD: 'entry:add',
   ENTRY_LIST_UNBILLED: 'entry:list-unbilled',
   BILL_GENERATE: 'bill:generate',
+  BILL_LIST_FOR_PARTY: 'bill:list-for-party',
+  BILL_GET: 'bill:get',
+  BILL_LIST_ALL: 'bill:list-all',
   PAYMENT_RECORD: 'payment:record',
   PAYMENT_LIST: 'payment:list',
   DAILY_LEDGER_CREATE: 'daily-ledger:create',
@@ -67,6 +81,22 @@ export interface ListPaymentsRequest {
   partyId: number;
 }
 
+export interface ListBillsForPartyRequest {
+  partyType: PartyType;
+  partyId: number;
+}
+
+export interface GetBillRequest {
+  partyType: PartyType;
+  billId: number;
+}
+
+export interface ListAllBillsRequest {
+  partyType?: PartyType;
+  fromDate?: string;
+  toDate?: string;
+}
+
 export interface CreateDailyLedgerRequest {
   ledgerDate: string; // 'YYYY-MM-DD'
 }
@@ -111,6 +141,9 @@ export interface KhataApi {
   addEntry(req: AddEntryRequest): Promise<number>;
   listUnbilledEntries(req: ListUnbilledEntriesRequest): Promise<Entry[]>;
   generateBill(req: GenerateBillRequest): Promise<Bill>;
+  listBillsForParty(req: ListBillsForPartyRequest): Promise<BillListItem[]>;
+  getBill(req: GetBillRequest): Promise<BillDetail>;
+  listAllBills(req: ListAllBillsRequest): Promise<BillListItem[]>;
   recordPayment(req: RecordPaymentRequest): Promise<Payment>;
   listPayments(req: ListPaymentsRequest): Promise<Payment[]>;
   createDailyLedger(req: CreateDailyLedgerRequest): Promise<DailyLedger>;

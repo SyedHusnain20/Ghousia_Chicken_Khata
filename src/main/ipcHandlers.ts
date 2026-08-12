@@ -8,6 +8,9 @@ import type {
   AddEntryRequest,
   ListUnbilledEntriesRequest,
   GenerateBillRequest,
+  ListBillsForPartyRequest,
+  GetBillRequest,
+  ListAllBillsRequest,
   RecordPaymentRequest,
   ListPaymentsRequest,
   CreateDailyLedgerRequest,
@@ -23,9 +26,12 @@ import {
   addEntry,
   getUnbilledEntries,
   generateBill,
+  getBillsForParty,
+  getBillById,
   recordPayment,
   getPayments,
 } from './services/partyService';
+import { listAllBills } from './services/billService';
 import {
   createDailyLedger,
   getDailyLedger,
@@ -71,6 +77,18 @@ export function registerIpcHandlers(db: Database.Database): void {
 
   ipcMain.handle(IpcChannels.PAYMENT_RECORD, (_event, req: RecordPaymentRequest) => {
     return recordPayment(db, req.partyType, req.partyId, req.amount, req.billId ?? null, req.note ?? null);
+  });
+
+  ipcMain.handle(IpcChannels.BILL_LIST_FOR_PARTY, (_event, req: ListBillsForPartyRequest) => {
+    return getBillsForParty(db, req.partyType, req.partyId);
+  });
+
+  ipcMain.handle(IpcChannels.BILL_GET, (_event, req: GetBillRequest) => {
+    return getBillById(db, req.partyType, req.billId);
+  });
+
+  ipcMain.handle(IpcChannels.BILL_LIST_ALL, (_event, req: ListAllBillsRequest) => {
+    return listAllBills(db, { partyType: req.partyType, fromDate: req.fromDate, toDate: req.toDate });
   });
 
   ipcMain.handle(IpcChannels.PAYMENT_LIST, (_event, req: ListPaymentsRequest) => {

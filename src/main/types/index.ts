@@ -29,6 +29,31 @@ export interface Bill {
   items: Entry[];
 }
 
+// One row in a bill-history list (profile page or the global Bills
+// screen). No items here - just enough to show a scannable list and link
+// through to the full printable bill via getBillById.
+export interface BillListItem {
+  id: number;
+  party_type: PartyType;
+  party_id: number;
+  party_name: string;
+  bill_date: string;
+  previous_due: number;
+  subtotal: number;
+  total_due_after_bill: number;
+  remaining_due: number;
+}
+
+// The full record behind a printable bill: the bill row, its locked-in
+// items, and enough party info to put a name/contact on the receipt
+// without a second round trip.
+export interface BillDetail extends Bill {
+  party_type: PartyType;
+  party_id: number;
+  party_name: string;
+  party_contact: string | null;
+}
+
 export interface Payment {
   id: number;
   party_type: PartyType;

@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3';
-import { PartyType, Party, Entry, Bill, Payment } from '../types';
+import { PartyType, Party, Entry, Bill, BillListItem, BillDetail, Payment } from '../types';
 
 // Table names differ by party type but the logic is identical, so we
 // resolve table names once per call rather than duplicating every function.
@@ -210,6 +210,65 @@ export function getPayments(db: Database.Database, partyType: PartyType, partyId
       `SELECT * FROM payments WHERE party_type = ? AND party_id = ? ORDER BY paid_at DESC, id DESC`
     )
     .all(partyType, partyId) as Payment[];
+}
+
+/**
+ * Bill history for one party, most recent first - backs the "Bill
+ * history" list on the Supplier/Customer profile screen. Deliberately
+ * lightweight (no items) since the profile just needs a scannable list;
+ * getBillById fetches the full printable bill on demand.
+ */
+export function getBillsForParty(db: Database.Database, partyType: PartyType, partyId: number): BillListItem[] {
+  const t = tables(partyType);
+  const party = getParty(db, partyType, partyId);
+  const rows = db
+    .prepare(`SELECT * FROM ${t.bills} WHERE ${t.fk} = ? ORDER BY bill_date DESC, id DESC`)
+    .all(partyId) as Array<Bill & Record<string, unknown>>;
+  return rows.map((row) => ({
+    id: row.id,
+    party_type: partyType,
+    party_id: partyId,
+    party_name: party.name,
+    bill_date: row.bill_date,
+    previous_due: row.previous_due,
+    subtotal: row.subtotal,
+    total_due_after_bill: row.total_due_after_bill,
+    remaining_due: row.remaining_due,
+  }));
+}
+
+/**
+ * The full record behind a printable bill - the bill row, its locked-in
+ * items (entries whose bill_id matches), and the party's name/contact for
+ * the receipt header. Throws if the bill doesn't exist.
+ */
+export function getBillById(db: Database.Database, partyType: PartyType, billId: number): BillDetail {
+  const t = tables(partyType);
+  const bill = db.prepare(`SELECT * FROM ${t.bills} WHERE id = ?`).get(billId) as
+    | (Bill & Record<string, unknown>)
+    | undefined;
+  if (!bill) throw new Error(`${partyType} bill ${billId} not found`);
+
+  const items = db
+    .prepare(`SELECT * FROM ${t.entries} WHERE bill_id = ? ORDER BY entry_date`)
+    .all(billId) as Entry[];
+
+  const partyId = bill[t.fk] as number;
+  const party = getParty(db, partyType, partyId);
+
+  return {
+    id: bill.id,
+    bill_date: bill.bill_date,
+    previous_due: bill.previous_due,
+    subtotal: bill.subtotal,
+    total_due_after_bill: bill.total_due_after_bill,
+    remaining_due: bill.remaining_due,
+    items,
+    party_type: partyType,
+    party_id: partyId,
+    party_name: party.name,
+    party_contact: party.contact_number,
+  };
 }
 
 export function round2(n: number): number {
