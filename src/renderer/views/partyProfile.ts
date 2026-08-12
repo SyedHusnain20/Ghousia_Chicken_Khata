@@ -269,7 +269,12 @@ function generateBillPanel(
   }
 
   const subtotal = entries.reduce((sum, e) => sum + e.line_total, 0);
-  const grandTotal = Math.round((currentDue + subtotal) * 100) / 100;
+  // currentDue already includes these unbilled entries (due updates as
+  // soon as each is logged now, not just at bill time), so the grand
+  // total the bill will show is simply the current due - not
+  // currentDue + subtotal, which would double-count them.
+  const grandTotal = currentDue;
+  const previousDue = Math.round((currentDue - subtotal) * 100) / 100;
 
   const paymentInput = el('input', { type: 'number', step: '0.01', min: '0', placeholder: '0 (optional)' }) as HTMLInputElement;
   const errorSlot = el('div', { class: 'form-error-slot' });
@@ -280,7 +285,7 @@ function generateBillPanel(
         el('span', {}, [`${entries.length} unbilled entr${entries.length === 1 ? 'y' : 'ies'}`]),
         el('span', {}, [formatRs(subtotal)]),
       ]),
-      el('div', { class: 'bill-preview-row' }, [el('span', {}, ['Previous due']), el('span', {}, [formatRs(currentDue)])]),
+      el('div', { class: 'bill-preview-row' }, [el('span', {}, ['Previous due']), el('span', {}, [formatRs(previousDue)])]),
       el('div', { class: 'bill-preview-row bill-preview-grand' }, [
         el('span', {}, ['Grand total']),
         el('span', {}, [formatRs(grandTotal)]),

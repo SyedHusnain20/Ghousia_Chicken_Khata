@@ -40,9 +40,12 @@ export function getAllParties(db: Database.Database, partyType: PartyType): Part
 export const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 /**
- * Log a single purchase/sale entry against a party. No bill is created and
- * no due is touched here - the entry just sits "unbilled" until it's swept
- * into a generated bill.
+ * Log a single purchase/sale entry against a party. The party's running
+ * due updates immediately (in the same transaction) - due reflects every
+ * recorded purchase/sale right away, whether or not it's ever swept into
+ * a bill. The entry itself sits "unbilled" (bill_id NULL) until it is
+ * later included in a generated bill, but that's purely a billing/receipt
+ * concern now - it no longer gates when the due changes.
  *
  * entryDate is optional and lets the shopkeeper backdate an entry (e.g.
  * logging Monday's purchase on Wednesday) so it lands in the correct
@@ -70,23 +73,34 @@ export function addEntry(
   const t = tables(partyType);
   const lineTotal = round2(weightKg * ratePerKg);
 
-  if (entryDate) {
-    // Midday timestamp keeps this entry sorting sensibly alongside
-    // same-day entries that used the default "now" timestamp, without
-    // implying a specific time of day that wasn't actually recorded.
-    const stmt = db.prepare(
-      `INSERT INTO ${t.entries} (${t.fk}, entry_date, item_name, weight_kg, rate_per_kg, line_total)
-       VALUES (?, ?, ?, ?, ?, ?)`
-    );
-    const result = stmt.run(partyId, `${entryDate} 12:00:00`, itemName, weightKg, ratePerKg, lineTotal);
-    return result.lastInsertRowid as number;
-  }
+  const run = db.transaction(() => {
+    let entryId: number;
+    if (entryDate) {
+      // Midday timestamp keeps this entry sorting sensibly alongside
+      // same-day entries that used the default "now" timestamp, without
+      // implying a specific time of day that wasn't actually recorded.
+      const stmt = db.prepare(
+        `INSERT INTO ${t.entries} (${t.fk}, entry_date, item_name, weight_kg, rate_per_kg, line_total)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      );
+      const result = stmt.run(partyId, `${entryDate} 12:00:00`, itemName, weightKg, ratePerKg, lineTotal);
+      entryId = result.lastInsertRowid as number;
+    } else {
+      const stmt = db.prepare(
+        `INSERT INTO ${t.entries} (${t.fk}, item_name, weight_kg, rate_per_kg, line_total) VALUES (?, ?, ?, ?, ?)`
+      );
+      const result = stmt.run(partyId, itemName, weightKg, ratePerKg, lineTotal);
+      entryId = result.lastInsertRowid as number;
+    }
 
-  const stmt = db.prepare(
-    `INSERT INTO ${t.entries} (${t.fk}, item_name, weight_kg, rate_per_kg, line_total) VALUES (?, ?, ?, ?, ?)`
-  );
-  const result = stmt.run(partyId, itemName, weightKg, ratePerKg, lineTotal);
-  return result.lastInsertRowid as number;
+    const party = getParty(db, partyType, partyId);
+    const newDue = round2(party.current_due + lineTotal);
+    db.prepare(`UPDATE ${t.party} SET current_due = ? WHERE id = ?`).run(newDue, partyId);
+
+    return entryId;
+  });
+
+  return run();
 }
 
 export function getUnbilledEntries(db: Database.Database, partyType: PartyType, partyId: number): Entry[] {
@@ -97,10 +111,12 @@ export function getUnbilledEntries(db: Database.Database, partyType: PartyType, 
 }
 
 /**
- * Bundles every unbilled entry for this party into one new bill, adds the
- * party's existing due, optionally records a payment against it, and
- * updates the party's running due. Runs as a single transaction so the
- * due figure can never end up half-updated.
+ * Bundles every unbilled entry for this party into one printable bill and
+ * locks them to it. current_due already reflects these entries (it was
+ * updated back in addEntry when each was logged), so this does NOT add
+ * the subtotal to the due again - it only produces the bill record and,
+ * if paymentNow>0, reduces the due via recordPayment same as always. Runs
+ * as a single transaction so nothing can end up half-updated.
  */
 export function generateBill(
   db: Database.Database,
@@ -119,8 +135,10 @@ export function generateBill(
     }
 
     const subtotal = round2(pending.reduce((sum, e) => sum + e.line_total, 0));
-    const previousDue = party.current_due;
-    const totalDueAfterBill = round2(previousDue + subtotal);
+    // current_due already includes this subtotal (added per-entry in
+    // addEntry), so "before this bill's entries" is current_due minus it.
+    const previousDue = round2(party.current_due - subtotal);
+    const totalDueAfterBill = party.current_due;
 
     const insertBill = db.prepare(
       `INSERT INTO ${t.bills} (${t.fk}, previous_due, subtotal, total_due_after_bill, remaining_due)
@@ -134,8 +152,7 @@ export function generateBill(
     const lockEntries = db.prepare(`UPDATE ${t.entries} SET bill_id = ? WHERE id = ?`);
     for (const entry of pending) lockEntries.run(billId, entry.id);
 
-    // Set the party's due to the bill total before any payment is applied
-    db.prepare(`UPDATE ${t.party} SET current_due = ? WHERE id = ?`).run(totalDueAfterBill, partyId);
+    // No current_due update here - it's already correct.
 
     // Payment at bill-generation time is optional
     if (paymentNow > 0) {

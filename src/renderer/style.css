@@ -609,6 +609,67 @@ input:focus, select:focus, button:focus-visible, a:focus-visible, .clickable-row
   }
 }
 
+/* ---------------- Daily Ledger ---------------- */
+
+.ledger-date-bar {
+  display: flex;
+  align-items: flex-end;
+  gap: 14px;
+  margin-bottom: 18px;
+  flex-wrap: wrap;
+}
+
+.ledger-date-label {
+  flex-direction: column;
+}
+
+.ledger-date-bar .btn {
+  margin-bottom: 1px;
+}
+
+.ledger-date-bar-spacer {
+  flex: 1;
+}
+
+.ledger-total-rule {
+  border: none;
+  border-top: 1px solid var(--color-border);
+  margin: 12px 0;
+}
+
+/* Fixed widths so KG / Rate / Total line up column-to-column even when
+   party names or amounts vary a lot in width. Scoped to this class only
+   so the other .data-table screens (bills, party profile) are unaffected. */
+.ledger-entries-table {
+  table-layout: fixed;
+}
+
+.ledger-entries-table th:nth-child(1),
+.ledger-entries-table td:nth-child(1) {
+  width: 34%;
+}
+
+.ledger-entries-table th:nth-child(2),
+.ledger-entries-table td:nth-child(2) {
+  width: 18%;
+}
+
+.ledger-entries-table th:nth-child(3),
+.ledger-entries-table td:nth-child(3) {
+  width: 22%;
+}
+
+.ledger-entries-table th:nth-child(4),
+.ledger-entries-table td:nth-child(4) {
+  width: 26%;
+}
+
+.ledger-entries-table td.cell-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ---------------- Bill generation preview ---------------- */
 
 .bill-preview {

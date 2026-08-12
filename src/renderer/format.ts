@@ -20,6 +20,25 @@ export function formatDue(amount: number): { text: string; kind: 'due' | 'credit
   return { text: `${formatRs(Math.abs(amount))} credit`, kind: 'credit' };
 }
 
+// Profit/Loss is never shown as a bare signed number - the shopkeeper
+// should always see the word "PROFIT" or "LOSS" spelled out (spec: "Do not
+// merely display a negative number without identifying it as a loss").
+// Reuses the due/credit/clear color vocabulary already used for balances:
+// profit = credit (green), loss = due (red), break-even = clear (grey).
+export function formatProfitLoss(amount: number): {
+  headline: string;
+  short: string;
+  kind: 'due' | 'credit' | 'clear';
+} {
+  if (Math.abs(amount) < 0.01) {
+    return { headline: 'Break even', short: formatRs(0), kind: 'clear' };
+  }
+  if (amount > 0) {
+    return { headline: `PROFIT: ${formatRs(amount)}`, short: `+${formatRs(amount)}`, kind: 'credit' };
+  }
+  return { headline: `LOSS: ${formatRs(Math.abs(amount))}`, short: `-${formatRs(Math.abs(amount))}`, kind: 'due' };
+}
+
 export function todayIso(): string {
   const now = new Date();
   const y = now.getFullYear();

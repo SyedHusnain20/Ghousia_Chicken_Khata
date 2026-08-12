@@ -6,6 +6,9 @@ import { renderPartyProfile } from './views/partyProfile';
 import { renderBillDetail } from './views/billDetail';
 import { renderBillsList } from './views/billsList';
 import { renderPlaceholder } from './views/placeholder';
+import { renderDailyLedger } from './views/dailyLedger';
+import { renderDailyLedgerHistory } from './views/dailyLedgerHistory';
+import { todayIso } from './format';
 
 const root = document.getElementById('app');
 if (!root) {
@@ -45,7 +48,15 @@ route('/customers/:id', (params, el) => {
 });
 
 route('/ledger', (_params, el) => {
-  renderPlaceholder(el, 'Daily Ledger', 'The Daily Ledger screen is built in the next step of this project.');
+  renderDailyLedger(todayIso(), el);
+});
+
+route('/ledger/history', (_params, el) => {
+  renderDailyLedgerHistory(el);
+});
+
+route('/ledger/:date', (params, el) => {
+  renderDailyLedger(params.date, el);
 });
 
 route('/bills', (_params, el) => {
