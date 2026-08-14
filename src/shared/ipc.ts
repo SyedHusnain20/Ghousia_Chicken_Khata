@@ -39,6 +39,7 @@ export const IpcChannels = {
   STORAGE_OPEN_FOLDER: 'storage:open-folder',
   STORAGE_CHOOSE_RESTORE_FILE: 'storage:choose-restore-file',
   STORAGE_CONFIRM_RESTORE: 'storage:confirm-restore',
+  REPORT_CUSTOMERS_CLOSING_PDF: 'report:customers-closing-pdf',
 } as const;
 
 export interface CreatePartyRequest {
@@ -208,4 +209,8 @@ export interface KhataApi {
   // restarts the app. As with confirmChangeStorageLocation, the promise
   // never resolves in the success case.
   confirmRestore(req: ConfirmRestoreRequest): Promise<void>;
+  // Builds the customer closing report, prompts for a save location, and
+  // opens the resulting PDF. Resolves to the saved file path, or null if
+  // the shopkeeper cancelled the save dialog.
+  generateCustomersClosingPdf(): Promise<string | null>;
 }

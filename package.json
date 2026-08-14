@@ -23,7 +23,7 @@
     "@types/node": "^20.14.0",
     "concurrently": "^10.0.4",
     "cross-env": "^10.1.0",
-    "electron": "^43.3.0",
+    "electron": "^32.0.0",
     "electron-builder": "^26.15.3",
     "ts-node": "^10.9.2",
     "typescript": "^5.5.0",
@@ -41,7 +41,15 @@
       "package.json"
     ],
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "allowToChangeInstallationDirectory": false
     }
   }
 }

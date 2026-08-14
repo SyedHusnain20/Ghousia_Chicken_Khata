@@ -1,11 +1,15 @@
 import { app, BrowserWindow, dialog } from 'electron';
+import fs from 'fs';
 import path from 'path';
 import Database from 'better-sqlite3';
 import { openDatabase } from './db/database';
 import { registerIpcHandlers } from './ipcHandlers';
 import { registerStorageIpcHandlers } from './storageIpcHandlers';
+import { registerReportIpcHandlers } from './reportsIpcHandlers';
 import { detectOneDrivePath, resolveStorageFolder, saveStorageFolder, dbFilePathFor } from './storage/storageLocation';
 import { ensureMonthlySnapshot } from './backup/snapshotService';
+
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 let db: Database.Database | null = null;
 let mainWindow: BrowserWindow | null = null;
@@ -56,12 +60,20 @@ async function runFirstRunFolderPicker(fallbackFolderPath: string): Promise<stri
 }
 
 function createWindow(): void {
+  // Copied alongside the compiled main process by scripts/copy-assets.js,
+  // from build/icon.ico - see that script's comment. Only affects the
+  // running app's own window (title bar/taskbar); the installer, Desktop
+  // shortcut, and .exe file icon are handled separately by electron-builder
+  // reading build/icon.ico directly (see package.json's "win.icon").
+  const iconPath = path.join(__dirname, 'icon.ico');
+
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
     minWidth: 1000,
     minHeight: 650,
     title: 'Ghousia Chicken Khata',
+    icon: fs.existsSync(iconPath) ? iconPath : undefined,
     webPreferences: {
       // Renderer never gets direct Node/electron access - everything goes
       // through the explicit, typed bridge in preload/index.ts.
@@ -104,6 +116,10 @@ app.whenReady().then(async () => {
   registerStorageIpcHandlers(
     () => db!,
     () => dbFolderPath,
+    () => mainWindow
+  );
+  registerReportIpcHandlers(
+    () => db!,
     () => mainWindow
   );
   createWindow();

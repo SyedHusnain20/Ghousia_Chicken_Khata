@@ -11,6 +11,10 @@ export function errorBanner(message: string): HTMLElement {
   return el('div', { class: 'banner banner-error', role: 'alert' }, [message]);
 }
 
+export function successBanner(message: string): HTMLElement {
+  return el('div', { class: 'banner banner-success', role: 'status' }, [message]);
+}
+
 export function loadingState(label = 'Loading...'): HTMLElement {
   return el('div', { class: 'state-message' }, [label]);
 }

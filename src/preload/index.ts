@@ -33,6 +33,7 @@ const IpcChannels = {
   STORAGE_OPEN_FOLDER: 'storage:open-folder',
   STORAGE_CHOOSE_RESTORE_FILE: 'storage:choose-restore-file',
   STORAGE_CONFIRM_RESTORE: 'storage:confirm-restore',
+  REPORT_CUSTOMERS_CLOSING_PDF: 'report:customers-closing-pdf',
 } as const;
 
 // This is the ONLY thing the renderer can touch. No direct ipcRenderer
@@ -63,6 +64,7 @@ const khataApi: KhataApi = {
   openStorageFolder: () => ipcRenderer.invoke(IpcChannels.STORAGE_OPEN_FOLDER),
   chooseRestoreFile: () => ipcRenderer.invoke(IpcChannels.STORAGE_CHOOSE_RESTORE_FILE),
   confirmRestore: (req) => ipcRenderer.invoke(IpcChannels.STORAGE_CONFIRM_RESTORE, req),
+  generateCustomersClosingPdf: () => ipcRenderer.invoke(IpcChannels.REPORT_CUSTOMERS_CLOSING_PDF),
 };
 
 contextBridge.exposeInMainWorld('khata', khataApi);

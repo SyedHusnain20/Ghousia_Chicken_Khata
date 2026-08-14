@@ -1,6 +1,6 @@
 import { el, mount } from '../dom';
 import { formatDue } from '../format';
-import { button, emptyState, errorBanner, errorMessage, loadingState, pageHeader } from '../components';
+import { button, emptyState, errorBanner, errorMessage, loadingState, pageHeader, successBanner } from '../components';
 import { navigate } from '../router';
 import type { Party, PartyType } from '../../main/types';
 
@@ -148,6 +148,7 @@ export async function renderPartyList(partyType: PartyType, container: HTMLEleme
 
   let showForm = false;
   let searchTerm = '';
+  let closingBusy = false;
 
   const searchInput = el('input', {
     type: 'search',
@@ -157,6 +158,7 @@ export async function renderPartyList(partyType: PartyType, container: HTMLEleme
 
   const tableWrap = el('div', { class: 'table-wrap' });
   const formWrap = el('div', { class: 'form-wrap' });
+  const feedbackWrap = el('div', { class: 'form-wrap' });
 
   function renderFiltered() {
     const term = searchTerm.trim().toLowerCase();
@@ -198,9 +200,37 @@ export async function renderPartyList(partyType: PartyType, container: HTMLEleme
     renderForm();
   });
 
+  const headerActions = [addBtn];
+
+  if (partyType === 'customer') {
+    const closingBtn = button('Closing', async () => {
+      if (closingBusy) return;
+      closingBusy = true;
+      feedbackWrap.replaceChildren();
+      closingBtn.disabled = true;
+      closingBtn.textContent = 'Generating\u2026';
+      try {
+        const savedPath = await window.khata.generateCustomersClosingPdf();
+        if (savedPath) {
+          feedbackWrap.replaceChildren(successBanner(`Saved to ${savedPath}`));
+        }
+        // null savedPath means the shopkeeper cancelled the save dialog -
+        // nothing was written, so no feedback needed either way.
+      } catch (err) {
+        feedbackWrap.replaceChildren(errorBanner(errorMessage(err)));
+      } finally {
+        closingBusy = false;
+        closingBtn.disabled = false;
+        closingBtn.textContent = 'Closing';
+      }
+    }, 'secondary');
+    headerActions.push(closingBtn);
+  }
+
   mount(
     container,
-    pageHeader(copy.title, [addBtn]),
+    pageHeader(copy.title, headerActions),
+    feedbackWrap,
     formWrap,
     el('div', { class: 'toolbar' }, [searchInput]),
     tableWrap
