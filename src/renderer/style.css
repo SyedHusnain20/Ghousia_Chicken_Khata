@@ -504,7 +504,7 @@ input:focus, select:focus, button:focus-visible, a:focus-visible, .clickable-row
   font-weight: 700;
 }
 
-.th-right {
+.data-table th.th-right {
   text-align: right;
 }
 
@@ -512,6 +512,7 @@ input:focus, select:focus, button:focus-visible, a:focus-visible, .clickable-row
   text-align: right;
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .cell-strong {
@@ -571,6 +572,62 @@ input:focus, select:focus, button:focus-visible, a:focus-visible, .clickable-row
   background: var(--color-due-tint);
   color: var(--color-due);
   border: 1px solid var(--color-due);
+}
+
+.banner-success {
+  background: var(--color-credit-tint);
+  color: var(--color-credit);
+  border: 1px solid var(--color-credit);
+}
+
+/* ---------------- Settings / Backup ---------------- */
+
+.badge {
+  display: inline-block;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 999px;
+  margin-bottom: 10px;
+}
+
+.badge-credit {
+  background: var(--color-credit-tint);
+  color: var(--color-credit);
+}
+
+.badge-due {
+  background: var(--color-due-tint);
+  color: var(--color-due);
+}
+
+.settings-path {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  background: var(--color-surface-muted);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  margin-bottom: 14px;
+  word-break: break-all;
+}
+
+.snapshot-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.snapshot-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 14px;
+}
+
+.snapshot-row:last-child {
+  border-bottom: none;
 }
 
 /* ---------------- Responsive ---------------- */
@@ -656,12 +713,12 @@ input:focus, select:focus, button:focus-visible, a:focus-visible, .clickable-row
 
 .ledger-entries-table th:nth-child(3),
 .ledger-entries-table td:nth-child(3) {
-  width: 22%;
+  width: 24%;
 }
 
 .ledger-entries-table th:nth-child(4),
 .ledger-entries-table td:nth-child(4) {
-  width: 26%;
+  width: 24%;
 }
 
 .ledger-entries-table td.cell-name {
@@ -856,6 +913,10 @@ input:focus, select:focus, button:focus-visible, a:focus-visible, .clickable-row
   margin-top: 16px;
   font-size: 11.5px;
   color: var(--color-text-muted);
+}
+
+.receipt-footer div + div {
+  margin-top: 2px;
 }
 
 /* When printing, show only the receipt at thermal-receipt width - hide

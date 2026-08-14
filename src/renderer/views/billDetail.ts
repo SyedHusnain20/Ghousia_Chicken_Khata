@@ -63,7 +63,10 @@ function receiptMarkup(bill: BillDetail): HTMLElement {
         el('span', {}, [formatRs(bill.remaining_due)]),
       ]),
     ]),
-    el('div', { class: 'receipt-footer' }, ['Thank you.']),
+    el('div', { class: 'receipt-footer' }, [
+      el('div', {}, ['Powered by R&R Digital Solutions']),
+      el('div', {}, ['Contact: 03126641281']),
+    ]),
   ]);
 }
 

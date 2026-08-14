@@ -1,6 +1,6 @@
 import { el } from '../dom';
 import { mount } from '../dom';
-import { formatDue, formatRs } from '../format';
+import { formatDue, formatProfitLoss, formatRs, todayIso } from '../format';
 import { errorBanner, errorMessage, loadingState } from '../components';
 import type { Party } from '../../main/types';
 
@@ -22,8 +22,8 @@ function summaryCard(label: string, valueText: string, kind: 'due' | 'credit' | 
   return card;
 }
 
-function comingSoonCard(label: string, note: string): HTMLElement {
-  return el('div', { class: 'summary-card summary-card-muted' }, [
+function comingSoonCard(label: string, note: string, href: string): HTMLElement {
+  return el('a', { class: 'summary-card summary-card-muted', href }, [
     el('span', { class: 'summary-label' }, [label]),
     el('span', { class: 'summary-value summary-value-small' }, [note]),
   ]);
@@ -44,6 +44,18 @@ export async function renderDashboard(container: HTMLElement): Promise<void> {
     return;
   }
 
+  // No Daily Ledger row for today yet is an expected, everyday state (the
+  // shopkeeper creates it once per business day) - not a real error, so
+  // it's handled separately rather than through the errorBanner above.
+  let todayProfitLossCard: HTMLElement;
+  try {
+    const todayLedger = await window.khata.getDailyLedger({ ledgerDate: todayIso() });
+    const result = formatProfitLoss(todayLedger.profit_loss);
+    todayProfitLossCard = summaryCard('Today\u2019s profit / loss', result.short, result.kind, '#/ledger');
+  } catch {
+    todayProfitLossCard = comingSoonCard('Today\u2019s profit / loss', 'No ledger yet today \u2014 tap to create it', '#/ledger');
+  }
+
   const supplierOwed = sumOwed(suppliers);
   const customerOwed = sumOwed(customers);
   const netPosition = customerOwed - supplierOwed;
@@ -60,7 +72,7 @@ export async function renderDashboard(container: HTMLElement): Promise<void> {
       netPosition >= 0 ? 'credit' : 'due',
       '#/'
     ),
-    comingSoonCard('Today\u2019s profit / loss', 'Set up in the Daily Ledger step'),
+    todayProfitLossCard,
   ]);
 
   const counts = el('div', { class: 'stat-row' }, [

@@ -1,6 +1,6 @@
 import Database from 'better-sqlite3';
 import { DailyLedger, DailyLedgerDetail, DailyLedgerSummary, EntryWithPartyName } from '../types';
-import { round2, DATE_ONLY_RE } from './partyService';
+import { round2, DATE_ONLY_RE, pakistanNow } from './partyService';
 
 function assertValidDate(date: string): void {
   if (!DATE_ONLY_RE.test(date)) {
@@ -135,11 +135,12 @@ export function updateDailyLedgerFields(
     throw new Error(`No Daily Ledger exists for ${ledgerDate} yet - create it first`);
   }
 
+  const updatedAt = `${pakistanNow().date} ${pakistanNow().time}`;
   db.prepare(
     `UPDATE daily_ledgers
-     SET cash_customer_income = ?, extra_expenses = ?, updated_at = datetime('now')
+     SET cash_customer_income = ?, extra_expenses = ?, updated_at = ?
      WHERE ledger_date = ?`
-  ).run(round2(cashCustomerIncome), round2(extraExpenses), ledgerDate);
+  ).run(round2(cashCustomerIncome), round2(extraExpenses), updatedAt, ledgerDate);
 
   return db.prepare('SELECT * FROM daily_ledgers WHERE ledger_date = ?').get(ledgerDate) as DailyLedger;
 }

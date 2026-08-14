@@ -26,6 +26,13 @@ const IpcChannels = {
   DAILY_LEDGER_UPDATE_FIELDS: 'daily-ledger:update-fields',
   DAILY_LEDGER_LIST: 'daily-ledger:list',
   DAILY_LEDGER_MONTHLY_SUMMARY: 'daily-ledger:monthly-summary',
+  STORAGE_GET_INFO: 'storage:get-info',
+  STORAGE_CHOOSE_FOLDER: 'storage:choose-folder',
+  STORAGE_CONFIRM_CHANGE: 'storage:confirm-change',
+  STORAGE_CREATE_SNAPSHOT_NOW: 'storage:create-snapshot-now',
+  STORAGE_OPEN_FOLDER: 'storage:open-folder',
+  STORAGE_CHOOSE_RESTORE_FILE: 'storage:choose-restore-file',
+  STORAGE_CONFIRM_RESTORE: 'storage:confirm-restore',
 } as const;
 
 // This is the ONLY thing the renderer can touch. No direct ipcRenderer
@@ -49,6 +56,13 @@ const khataApi: KhataApi = {
   updateDailyLedgerFields: (req) => ipcRenderer.invoke(IpcChannels.DAILY_LEDGER_UPDATE_FIELDS, req),
   listDailyLedgers: (req) => ipcRenderer.invoke(IpcChannels.DAILY_LEDGER_LIST, req),
   getMonthlySummary: (req) => ipcRenderer.invoke(IpcChannels.DAILY_LEDGER_MONTHLY_SUMMARY, req),
+  getStorageInfo: () => ipcRenderer.invoke(IpcChannels.STORAGE_GET_INFO),
+  chooseStorageFolder: () => ipcRenderer.invoke(IpcChannels.STORAGE_CHOOSE_FOLDER),
+  confirmChangeStorageLocation: (req) => ipcRenderer.invoke(IpcChannels.STORAGE_CONFIRM_CHANGE, req),
+  createSnapshotNow: () => ipcRenderer.invoke(IpcChannels.STORAGE_CREATE_SNAPSHOT_NOW),
+  openStorageFolder: () => ipcRenderer.invoke(IpcChannels.STORAGE_OPEN_FOLDER),
+  chooseRestoreFile: () => ipcRenderer.invoke(IpcChannels.STORAGE_CHOOSE_RESTORE_FILE),
+  confirmRestore: (req) => ipcRenderer.invoke(IpcChannels.STORAGE_CONFIRM_RESTORE, req),
 };
 
 contextBridge.exposeInMainWorld('khata', khataApi);

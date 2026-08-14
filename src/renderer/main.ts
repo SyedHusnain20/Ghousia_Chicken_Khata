@@ -8,6 +8,7 @@ import { renderBillsList } from './views/billsList';
 import { renderPlaceholder } from './views/placeholder';
 import { renderDailyLedger } from './views/dailyLedger';
 import { renderDailyLedgerHistory } from './views/dailyLedgerHistory';
+import { renderSettings } from './views/settings';
 import { todayIso } from './format';
 
 const root = document.getElementById('app');
@@ -74,7 +75,7 @@ route('/bills/:partyType/:id', (params, el) => {
 });
 
 route('/settings', (_params, el) => {
-  renderPlaceholder(el, 'Settings / Backup', 'Backup and restore tools are built in a later step of this project.');
+  renderSettings(el);
 });
 
 setNotFound((_params, el) => {

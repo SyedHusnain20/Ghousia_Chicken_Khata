@@ -1,11 +1,59 @@
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, dialog } from 'electron';
 import path from 'path';
 import Database from 'better-sqlite3';
 import { openDatabase } from './db/database';
 import { registerIpcHandlers } from './ipcHandlers';
+import { registerStorageIpcHandlers } from './storageIpcHandlers';
+import { detectOneDrivePath, resolveStorageFolder, saveStorageFolder, dbFilePathFor } from './storage/storageLocation';
+import { ensureMonthlySnapshot } from './backup/snapshotService';
 
 let db: Database.Database | null = null;
 let mainWindow: BrowserWindow | null = null;
+let dbFolderPath = '';
+
+/**
+ * Runs once, before any window exists, when there's no saved storage
+ * location yet on this laptop (fresh install, or the previously saved
+ * folder has gone missing). Detects OneDrive on THIS machine - never a
+ * path baked in ahead of time - offers it as the default, and falls back
+ * to a manual folder picker either way. If the shopkeeper dismisses
+ * everything, the app still starts up using its own local data folder so
+ * they're never blocked; they can set a real location later from
+ * Settings.
+ */
+async function runFirstRunFolderPicker(fallbackFolderPath: string): Promise<string> {
+  const oneDrivePath = detectOneDrivePath();
+
+  if (oneDrivePath) {
+    const choice = await dialog.showMessageBox({
+      type: 'question',
+      title: 'Set up backups',
+      message: 'We found OneDrive on this computer.',
+      detail: `Store your data in OneDrive so it's always backed up?\n\n${oneDrivePath}`,
+      buttons: ['Use OneDrive', 'Choose a different folder', 'Skip for now'],
+      defaultId: 0,
+      cancelId: 2,
+    });
+    if (choice.response === 0) return oneDrivePath;
+    if (choice.response === 2) return fallbackFolderPath;
+    // else fall through to the manual picker below
+  } else {
+    const choice = await dialog.showMessageBox({
+      type: 'info',
+      title: 'Set up backups',
+      message: "We couldn't find OneDrive on this computer.",
+      detail: 'Choose a folder (e.g. a OneDrive, Google Drive, or Dropbox folder) to keep your data always backed up. You can also set this up later from Settings.',
+      buttons: ['Choose a folder', 'Skip for now'],
+      defaultId: 0,
+      cancelId: 1,
+    });
+    if (choice.response === 1) return fallbackFolderPath;
+  }
+
+  const picked = await dialog.showOpenDialog({ properties: ['openDirectory', 'createDirectory'] });
+  if (picked.canceled || picked.filePaths.length === 0) return fallbackFolderPath;
+  return picked.filePaths[0];
+}
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
@@ -41,16 +89,33 @@ function createWindow(): void {
   });
 }
 
-app.whenReady().then(() => {
-  // Single local DB file living in the OS user-data folder, e.g.
-  // %APPDATA%/Ghousia Chicken Khata/khata.db on Windows - persists across
-  // app updates and is what Settings > Backup/Restore will read and write
-  // in a later phase.
-  const dbPath = path.join(app.getPath('userData'), 'khata.db');
-  db = openDatabase(dbPath);
+app.whenReady().then(async () => {
+  const resolved = resolveStorageFolder();
+  dbFolderPath = resolved.dbFolderPath;
+
+  if (resolved.isFirstRun) {
+    dbFolderPath = await runFirstRunFolderPicker(resolved.dbFolderPath);
+    saveStorageFolder(dbFolderPath);
+  }
+
+  db = openDatabase(dbFilePathFor(dbFolderPath));
 
   registerIpcHandlers(db);
+  registerStorageIpcHandlers(
+    () => db!,
+    () => dbFolderPath,
+    () => mainWindow
+  );
   createWindow();
+
+  // Cheap no-op most days (only actually copies anything once a month) -
+  // safe and fast enough to run on every launch without the shopkeeper
+  // noticing any delay.
+  ensureMonthlySnapshot(db, dbFolderPath).catch(() => {
+    // A failed snapshot (e.g. disk full, folder briefly unavailable
+    // mid-sync) shouldn't block the shopkeeper from using the app -
+    // it'll simply retry next launch.
+  });
 
   app.on('activate', () => {
     // macOS convention: re-create a window when the dock icon is clicked
@@ -68,7 +133,7 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
-  // Flush and close cleanly so WAL files don't linger unmerged.
+  // Flush and close cleanly.
   db?.close();
   db = null;
 });

@@ -39,6 +39,21 @@ export function getAllParties(db: Database.Database, partyType: PartyType): Part
 
 export const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
+// Pakistan Standard Time is a fixed UTC+5 offset with no daylight saving,
+// so it's computed explicitly from UTC fields rather than relying on the
+// laptop's own system timezone (which may be misconfigured) or SQLite's
+// datetime('now'), which returns UTC.
+export function pakistanNow(): { date: string; time: string } {
+  const pkt = new Date(Date.now() + 5 * 60 * 60 * 1000);
+  const y = pkt.getUTCFullYear();
+  const m = String(pkt.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(pkt.getUTCDate()).padStart(2, '0');
+  const hh = String(pkt.getUTCHours()).padStart(2, '0');
+  const mm = String(pkt.getUTCMinutes()).padStart(2, '0');
+  const ss = String(pkt.getUTCSeconds()).padStart(2, '0');
+  return { date: `${y}-${m}-${d}`, time: `${hh}:${mm}:${ss}` };
+}
+
 /**
  * Log a single purchase/sale entry against a party. The party's running
  * due updates immediately (in the same transaction) - due reflects every
@@ -47,9 +62,13 @@ export const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
  * later included in a generated bill, but that's purely a billing/receipt
  * concern now - it no longer gates when the due changes.
  *
- * entryDate is optional and lets the shopkeeper backdate an entry (e.g.
- * logging Monday's purchase on Wednesday) so it lands in the correct
- * Daily Ledger date. Expects 'YYYY-MM-DD'; defaults to right now.
+ * entryDate is optional and lets the shopkeeper backdate an entry's
+ * calendar date (e.g. logging Monday's purchase on Wednesday) so it lands
+ * in the correct Daily Ledger date. Expects 'YYYY-MM-DD'; defaults to
+ * today. Either way, the time-of-day stamped is always the real current
+ * time in Pakistan Standard Time - never a placeholder - so entries sort
+ * correctly and the actual time an entry was logged is preserved even for
+ * backdated entries.
  */
 export function addEntry(
   db: Database.Database,
@@ -74,24 +93,14 @@ export function addEntry(
   const lineTotal = round2(weightKg * ratePerKg);
 
   const run = db.transaction(() => {
-    let entryId: number;
-    if (entryDate) {
-      // Midday timestamp keeps this entry sorting sensibly alongside
-      // same-day entries that used the default "now" timestamp, without
-      // implying a specific time of day that wasn't actually recorded.
-      const stmt = db.prepare(
-        `INSERT INTO ${t.entries} (${t.fk}, entry_date, item_name, weight_kg, rate_per_kg, line_total)
-         VALUES (?, ?, ?, ?, ?, ?)`
-      );
-      const result = stmt.run(partyId, `${entryDate} 12:00:00`, itemName, weightKg, ratePerKg, lineTotal);
-      entryId = result.lastInsertRowid as number;
-    } else {
-      const stmt = db.prepare(
-        `INSERT INTO ${t.entries} (${t.fk}, item_name, weight_kg, rate_per_kg, line_total) VALUES (?, ?, ?, ?, ?)`
-      );
-      const result = stmt.run(partyId, itemName, weightKg, ratePerKg, lineTotal);
-      entryId = result.lastInsertRowid as number;
-    }
+    const now = pakistanNow();
+    const stampedEntryDate = `${entryDate ?? now.date} ${now.time}`;
+    const stmt = db.prepare(
+      `INSERT INTO ${t.entries} (${t.fk}, entry_date, item_name, weight_kg, rate_per_kg, line_total)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    );
+    const result = stmt.run(partyId, stampedEntryDate, itemName, weightKg, ratePerKg, lineTotal);
+    const entryId = result.lastInsertRowid as number;
 
     const party = getParty(db, partyType, partyId);
     const newDue = round2(party.current_due + lineTotal);
@@ -140,12 +149,14 @@ export function generateBill(
     const previousDue = round2(party.current_due - subtotal);
     const totalDueAfterBill = party.current_due;
 
+    const now = pakistanNow();
+    const billDate = `${now.date} ${now.time}`;
     const insertBill = db.prepare(
-      `INSERT INTO ${t.bills} (${t.fk}, previous_due, subtotal, total_due_after_bill, remaining_due)
-       VALUES (?, ?, ?, ?, ?)`
+      `INSERT INTO ${t.bills} (${t.fk}, bill_date, previous_due, subtotal, total_due_after_bill, remaining_due)
+       VALUES (?, ?, ?, ?, ?, ?)`
     );
     // remaining_due is finalized after payment below; insert a placeholder first
-    const billResult = insertBill.run(partyId, previousDue, subtotal, totalDueAfterBill, totalDueAfterBill);
+    const billResult = insertBill.run(partyId, billDate, previousDue, subtotal, totalDueAfterBill, totalDueAfterBill);
     const billId = billResult.lastInsertRowid as number;
 
     // Lock the swept-up entries to this bill
@@ -166,7 +177,7 @@ export function generateBill(
 
     return {
       id: billId,
-      bill_date: new Date().toISOString(),
+      bill_date: billDate,
       previous_due: previousDue,
       subtotal,
       total_due_after_bill: totalDueAfterBill,
@@ -195,10 +206,12 @@ export function recordPayment(
   const t = tables(partyType);
 
   const run = db.transaction(() => {
+    const now = pakistanNow();
+    const paidAt = `${now.date} ${now.time}`;
     const insertPayment = db.prepare(
-      `INSERT INTO payments (party_type, party_id, bill_id, amount, note) VALUES (?, ?, ?, ?, ?)`
+      `INSERT INTO payments (party_type, party_id, bill_id, amount, note, paid_at) VALUES (?, ?, ?, ?, ?, ?)`
     );
-    const result = insertPayment.run(partyType, partyId, billId, amount, note);
+    const result = insertPayment.run(partyType, partyId, billId, amount, note, paidAt);
 
     const party = getParty(db, partyType, partyId);
     const newDue = round2(party.current_due - amount);

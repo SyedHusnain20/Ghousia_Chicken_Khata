@@ -123,3 +123,8 @@ export function registerIpcHandlers(db: Database.Database): void {
 export function unregisterIpcHandlers(): void {
   Object.values(IpcChannels).forEach((channel) => ipcMain.removeHandler(channel));
 }
+
+// Re-exported so tests that both call registerStorageIpcHandlers() and
+// this file's registerIpcHandlers() only need one teardown call - see
+// unregisterIpcHandlers() above, which already iterates every channel in
+// IpcChannels (including the storage:* ones added there).

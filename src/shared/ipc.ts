@@ -10,6 +10,8 @@ import {
   DailyLedgerDetail,
   DailyLedgerSummary,
 } from '../main/types';
+import type { SnapshotInfo } from '../main/backup/snapshotService';
+export type { SnapshotInfo };
 
 // Centralized channel names so main and preload never drift out of sync
 // (a typo here fails loudly at compile time instead of silently at runtime).
@@ -30,6 +32,13 @@ export const IpcChannels = {
   DAILY_LEDGER_UPDATE_FIELDS: 'daily-ledger:update-fields',
   DAILY_LEDGER_LIST: 'daily-ledger:list',
   DAILY_LEDGER_MONTHLY_SUMMARY: 'daily-ledger:monthly-summary',
+  STORAGE_GET_INFO: 'storage:get-info',
+  STORAGE_CHOOSE_FOLDER: 'storage:choose-folder',
+  STORAGE_CONFIRM_CHANGE: 'storage:confirm-change',
+  STORAGE_CREATE_SNAPSHOT_NOW: 'storage:create-snapshot-now',
+  STORAGE_OPEN_FOLDER: 'storage:open-folder',
+  STORAGE_CHOOSE_RESTORE_FILE: 'storage:choose-restore-file',
+  STORAGE_CONFIRM_RESTORE: 'storage:confirm-restore',
 } as const;
 
 export interface CreatePartyRequest {
@@ -127,6 +136,38 @@ export interface MonthlySummary {
   total_profit_loss: number;
 }
 
+export interface StorageInfo {
+  dbFolderPath: string;
+  dbFilePath: string;
+  isOneDrive: boolean; // whether dbFolderPath currently lives inside the detected OneDrive folder
+  oneDriveDetectedPath: string | null; // null if OneDrive isn't set up on this laptop at all
+  snapshots: SnapshotInfo[]; // newest first
+}
+
+// Result of opening the "choose a new folder" dialog. null (via the
+// Promise resolving to null) means the shopkeeper cancelled the dialog.
+export interface ChooseFolderResult {
+  folderPath: string;
+  hasExistingDatabase: boolean; // true if khata.db already exists there - renderer must confirm overwrite
+}
+
+export interface ConfirmChangeStorageRequest {
+  folderPath: string;
+  overwrite: boolean; // must be true if ChooseFolderResult.hasExistingDatabase was true
+}
+
+// Result of picking a file to restore from. isValid is false if the file
+// doesn't look like a khata database - the renderer should show an error
+// rather than letting the shopkeeper proceed with an unrelated file.
+export interface ChooseRestoreFileResult {
+  filePath: string;
+  isValid: boolean;
+}
+
+export interface ConfirmRestoreRequest {
+  filePath: string;
+}
+
 /**
  * The full surface exposed to the renderer via contextBridge as
  * `window.khata`. Keeping this interface here means the renderer (once it
@@ -151,4 +192,20 @@ export interface KhataApi {
   updateDailyLedgerFields(req: UpdateDailyLedgerFieldsRequest): Promise<DailyLedger>;
   listDailyLedgers(req: ListDailyLedgersRequest): Promise<DailyLedgerSummary[]>;
   getMonthlySummary(req: GetMonthlySummaryRequest): Promise<MonthlySummary>;
+  getStorageInfo(): Promise<StorageInfo>;
+  // Opens a native folder-picker dialog. Resolves to null if cancelled.
+  chooseStorageFolder(): Promise<ChooseFolderResult | null>;
+  // Moves the live database to the new folder, saves it as the new
+  // location, then restarts the app. The renderer's promise will never
+  // resolve in the success case - the app quits before it can reply.
+  confirmChangeStorageLocation(req: ConfirmChangeStorageRequest): Promise<void>;
+  createSnapshotNow(): Promise<SnapshotInfo>;
+  openStorageFolder(): Promise<void>;
+  // Opens a native file-picker filtered to .db files, defaulting to the
+  // Snapshots folder. Resolves to null if cancelled.
+  chooseRestoreFile(): Promise<ChooseRestoreFileResult | null>;
+  // Restores from the given file, safety-copying current data first, then
+  // restarts the app. As with confirmChangeStorageLocation, the promise
+  // never resolves in the success case.
+  confirmRestore(req: ConfirmRestoreRequest): Promise<void>;
 }
