@@ -92,7 +92,7 @@
 
   <label>Your Machine ID</label>
   <div class="machine-id-box">
-    <div class="machine-id" id="machineId">Loading\u2026</div>
+    <div class="machine-id" id="machineId">Loading...</div>
     <button id="copyBtn">Copy</button>
   </div>
 
@@ -108,9 +108,20 @@
     const copyBtn = document.getElementById('copyBtn');
     const statusEl = document.getElementById('status');
 
-    window.activation.getMachineId().then((id) => {
-      machineIdEl.textContent = id;
-    });
+    window.activation
+      .getMachineId()
+      .then((id) => {
+        machineIdEl.textContent = id;
+      })
+      .catch((err) => {
+        // Surface the real failure instead of hanging on "Loading..."
+        // forever with no explanation.
+        machineIdEl.textContent = 'Could not read this computer\u2019s Machine ID';
+        statusEl.className = 'error';
+        statusEl.textContent =
+          'Error: ' + (err && err.message ? err.message : String(err)) +
+          '. Please screenshot this and send it to R&R Digital Solutions.';
+      });
 
     copyBtn.addEventListener('click', () => {
       navigator.clipboard.writeText(machineIdEl.textContent);
@@ -124,13 +135,19 @@
       activateBtn.disabled = true;
       statusEl.className = '';
       statusEl.textContent = 'Checking\u2026';
-      const ok = await window.activation.submitCode(code);
-      if (ok) {
-        statusEl.className = 'success';
-        statusEl.textContent = 'Activated! Starting the app\u2026';
-      } else {
+      try {
+        const ok = await window.activation.submitCode(code);
+        if (ok) {
+          statusEl.className = 'success';
+          statusEl.textContent = 'Activated! Starting the app\u2026';
+        } else {
+          statusEl.className = 'error';
+          statusEl.textContent = 'That code isn\u2019t valid for this computer. Double-check it and try again.';
+          activateBtn.disabled = false;
+        }
+      } catch (err) {
         statusEl.className = 'error';
-        statusEl.textContent = 'That code isn\u2019t valid for this computer. Double-check it and try again.';
+        statusEl.textContent = 'Error: ' + (err && err.message ? err.message : String(err));
         activateBtn.disabled = false;
       }
     }
