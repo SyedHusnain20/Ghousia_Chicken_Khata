@@ -22,10 +22,17 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Install dependencies
-        run: npm ci
+        # npm install rather than npm ci: npm ci demands package.json and
+        # package-lock.json match exactly and fails hard otherwise. If the
+        # lock file ever drifts out of sync locally (e.g. package.json's
+        # electron version was changed without re-running npm install
+        # locally to update the lock file), npm install just resolves and
+        # updates it instead of refusing to proceed - more forgiving for a
+        # small solo project like this one.
+        run: npm install
 
       - name: Build the installer
         run: npm run pack
