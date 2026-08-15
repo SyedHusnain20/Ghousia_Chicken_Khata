@@ -2,6 +2,7 @@
   "name": "khata-app",
   "version": "0.1.0",
   "description": "Local khata (ledger) software for a chicken shop - supplier & customer due tracking",
+  "author": "R&R Digital Solutions",
   "private": true,
   "main": "dist/main/index.js",
   "scripts": {
@@ -33,6 +34,7 @@
   "build": {
     "appId": "com.ghousia.chickenkhata",
     "productName": "Ghousia Chicken Khata",
+    "copyright": "Copyright \u00a9 2026 R&R Digital Solutions",
     "publish": null,
     "directories": {
       "output": "release"
@@ -43,7 +45,8 @@
     ],
     "win": {
       "target": "nsis",
-      "icon": "build/icon.ico"
+      "icon": "build/icon.ico",
+      "publisherName": "R&R Digital Solutions"
     },
     "nsis": {
       "oneClick": true,
