@@ -10,7 +10,6 @@ const root = path.join(__dirname, '..');
 
 const filesToCopy = [
   ['src/main/db/schema.sql', 'dist/main/db/schema.sql'],
-  ['src/main/license/activation.html', 'dist/main/license/activation.html'],
   // Optional: only copied if present, so the build doesn't break before an
   // icon has been added. See build/icon.ico's own comment for where this
   // is used - electron-builder reads it directly for the installer/
