@@ -45,8 +45,7 @@
     ],
     "win": {
       "target": "nsis",
-      "icon": "build/icon.ico",
-      "publisherName": "R&R Digital Solutions"
+      "icon": "build/icon.ico"
     },
     "nsis": {
       "oneClick": true,
