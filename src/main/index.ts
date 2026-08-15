@@ -8,6 +8,8 @@ import { registerStorageIpcHandlers } from './storageIpcHandlers';
 import { registerReportIpcHandlers } from './reportsIpcHandlers';
 import { detectOneDrivePath, resolveStorageFolder, saveStorageFolder, dbFilePathFor } from './storage/storageLocation';
 import { ensureMonthlySnapshot } from './backup/snapshotService';
+import { checkActivation } from './license/licenseService';
+import { showActivationWindow } from './license/activationWindow';
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -102,6 +104,16 @@ function createWindow(): void {
 }
 
 app.whenReady().then(async () => {
+  const activation = checkActivation();
+  if (!activation.activated) {
+    // Blocks here until either a valid code is entered (resolves) or the
+    // shopkeeper closes the window without activating (quits the app
+    // inside showActivationWindow - nothing below this line runs in that
+    // case). Runs before anything else touches storage/the database, so
+    // an unactivated copy never gets as far as showing any real data.
+    await showActivationWindow();
+  }
+
   const resolved = resolveStorageFolder();
   dbFolderPath = resolved.dbFolderPath;
 

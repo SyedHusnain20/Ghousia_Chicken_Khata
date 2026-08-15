@@ -10,8 +10,11 @@ node_modules/
 
 # Build output
 dist/
-build/
 out/
+release/
+
+# License signing key - NEVER commit this. See license-tools/README.md.
+license-tools/private-key.pem
 
 # TypeScript
 *.tsbuildinfo

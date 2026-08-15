@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Activate Ghousia Chicken Khata</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: Segoe UI, Arial, sans-serif;
+    background: #f4efe6;
+    color: #2a2420;
+    padding: 28px 32px;
+  }
+  h1 {
+    font-size: 18px;
+    margin: 0 0 4px 0;
+  }
+  p {
+    font-size: 13px;
+    color: #6b6259;
+    line-height: 1.5;
+    margin: 0 0 16px 0;
+  }
+  .machine-id-box {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 20px;
+  }
+  .machine-id {
+    flex: 1;
+    font-family: Consolas, monospace;
+    font-size: 13px;
+    background: white;
+    border: 1px solid #ddd6cc;
+    border-radius: 6px;
+    padding: 8px 10px;
+    user-select: all;
+  }
+  button {
+    font-family: inherit;
+    font-size: 13px;
+    border-radius: 6px;
+    border: 1px solid #ddd6cc;
+    background: white;
+    padding: 8px 12px;
+    cursor: pointer;
+  }
+  button:hover { background: #f4efe6; }
+  button.primary {
+    background: #6b3f2a;
+    color: white;
+    border-color: #6b3f2a;
+    width: 100%;
+    padding: 10px;
+    font-size: 14px;
+    margin-top: 6px;
+  }
+  button.primary:disabled {
+    opacity: 0.6;
+    cursor: default;
+  }
+  label {
+    font-size: 12px;
+    font-weight: 600;
+    color: #6b6259;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+  }
+  input[type="text"] {
+    width: 100%;
+    font-family: Consolas, monospace;
+    font-size: 14px;
+    padding: 10px;
+    border: 1px solid #ddd6cc;
+    border-radius: 6px;
+    margin: 6px 0 14px 0;
+  }
+  #status {
+    font-size: 13px;
+    min-height: 18px;
+    margin-top: 10px;
+  }
+  #status.error { color: #a13a2f; }
+  #status.success { color: #2f6b3f; }
+</style>
+</head>
+<body>
+  <h1>Activation Required</h1>
+  <p>This copy of Ghousia Chicken Khata needs to be activated for this computer. Send your Machine ID below to R&amp;R Digital Solutions (Contact: 03126641281) to receive your activation code.</p>
+
+  <label>Your Machine ID</label>
+  <div class="machine-id-box">
+    <div class="machine-id" id="machineId">Loading\u2026</div>
+    <button id="copyBtn">Copy</button>
+  </div>
+
+  <label for="codeInput">Activation Code</label>
+  <input type="text" id="codeInput" placeholder="Paste the code you were given" autocomplete="off" />
+  <button class="primary" id="activateBtn">Activate</button>
+  <div id="status"></div>
+
+  <script>
+    const machineIdEl = document.getElementById('machineId');
+    const codeInput = document.getElementById('codeInput');
+    const activateBtn = document.getElementById('activateBtn');
+    const copyBtn = document.getElementById('copyBtn');
+    const statusEl = document.getElementById('status');
+
+    window.activation.getMachineId().then((id) => {
+      machineIdEl.textContent = id;
+    });
+
+    copyBtn.addEventListener('click', () => {
+      navigator.clipboard.writeText(machineIdEl.textContent);
+      copyBtn.textContent = 'Copied';
+      setTimeout(() => (copyBtn.textContent = 'Copy'), 1500);
+    });
+
+    async function submit() {
+      const code = codeInput.value.trim();
+      if (!code) return;
+      activateBtn.disabled = true;
+      statusEl.className = '';
+      statusEl.textContent = 'Checking\u2026';
+      const ok = await window.activation.submitCode(code);
+      if (ok) {
+        statusEl.className = 'success';
+        statusEl.textContent = 'Activated! Starting the app\u2026';
+      } else {
+        statusEl.className = 'error';
+        statusEl.textContent = 'That code isn\u2019t valid for this computer. Double-check it and try again.';
+        activateBtn.disabled = false;
+      }
+    }
+
+    activateBtn.addEventListener('click', submit);
+    codeInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') submit();
+    });
+  </script>
+</body>
+</html>
