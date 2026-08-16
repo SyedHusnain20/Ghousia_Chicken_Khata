@@ -120,6 +120,64 @@ export function getUnbilledEntries(db: Database.Database, partyType: PartyType, 
 }
 
 /**
+ * Edits an existing entry - but only while it's still unbilled. Once an
+ * entry is swept into a bill, that bill is an immutable snapshot (the
+ * party may already have a printed copy of it), so editing it afterward
+ * would silently change a record that's supposed to be fixed. The
+ * party's running due is adjusted by the difference between the old and
+ * new line totals, not recalculated from scratch, so this stays correct
+ * even if other entries have been added/billed in the meantime.
+ */
+export function updateEntry(
+  db: Database.Database,
+  partyType: PartyType,
+  partyId: number,
+  entryId: number,
+  itemName: string,
+  weightKg: number,
+  ratePerKg: number,
+  entryDate?: string
+): void {
+  if (!Number.isFinite(weightKg) || weightKg <= 0) {
+    throw new Error('Weight (KG) must be a number greater than zero');
+  }
+  if (!Number.isFinite(ratePerKg) || ratePerKg <= 0) {
+    throw new Error('Rate per KG must be a number greater than zero');
+  }
+  if (entryDate !== undefined && !DATE_ONLY_RE.test(entryDate)) {
+    throw new Error("entryDate must be in 'YYYY-MM-DD' format");
+  }
+
+  const t = tables(partyType);
+  const newLineTotal = round2(weightKg * ratePerKg);
+
+  db.transaction(() => {
+    const existing = db
+      .prepare(`SELECT * FROM ${t.entries} WHERE id = ? AND ${t.fk} = ?`)
+      .get(entryId, partyId) as Entry | undefined;
+    if (!existing) throw new Error('Entry not found');
+    if (existing.bill_id !== null) {
+      throw new Error('This entry has already been billed and can no longer be edited');
+    }
+
+    // Preserve the original time-of-day, only replace the calendar date
+    // (same convention addEntry uses for backdating) - editing shouldn't
+    // silently rewrite when the entry was actually logged.
+    const existingTime = existing.entry_date.split(' ')[1] ?? pakistanNow().time;
+    const newEntryDate = entryDate !== undefined ? `${entryDate} ${existingTime}` : existing.entry_date;
+
+    db.prepare(
+      `UPDATE ${t.entries} SET entry_date = ?, item_name = ?, weight_kg = ?, rate_per_kg = ?, line_total = ? WHERE id = ?`
+    ).run(newEntryDate, itemName, weightKg, ratePerKg, newLineTotal, entryId);
+
+    const party = getParty(db, partyType, partyId);
+    const dueAdjustment = round2(newLineTotal - existing.line_total);
+    const newDue = round2(party.current_due + dueAdjustment);
+    db.prepare(`UPDATE ${t.party} SET current_due = ? WHERE id = ?`).run(newDue, partyId);
+  })();
+}
+
+/**
  * Bundles every unbilled entry for this party into one printable bill and
  * locks them to it. current_due already reflects these entries (it was
  * updated back in addEntry when each was logged), so this does NOT add

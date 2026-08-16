@@ -220,6 +220,11 @@ a {
   color: #FFF;
 }
 
+.btn-small {
+  padding: 6px 12px;
+  font-size: 13px;
+}
+
 /* ---------------- Dashboard summary cards ---------------- */
 
 .summary-grid {
@@ -532,6 +537,41 @@ input:focus, select:focus, button:focus-visible, a:focus-visible, .clickable-row
   font-family: var(--font-mono);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
+}
+
+.cell-actions {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.entry-edit-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.entry-edit-row td {
+  vertical-align: top;
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+
+.entry-edit-row input {
+  width: 100%;
+  font-family: var(--font-body);
+  font-size: 14px;
+  padding: 7px 9px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.entry-edit-row .form-error-slot:empty {
+  display: none;
+}
+
+.entry-edit-row .form-error-slot {
+  margin-top: 8px;
+  text-align: left;
 }
 
 .cell-due { color: var(--color-due); }

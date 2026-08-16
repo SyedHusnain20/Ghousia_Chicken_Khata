@@ -164,38 +164,159 @@ function paymentForm(partyType: PartyType, partyId: number, currentDue: number, 
   return form;
 }
 
-function entriesTable(entries: Entry[]): HTMLElement {
-  if (entries.length === 0) {
-    return emptyState('No unbilled entries yet.');
-  }
-  const rows = entries.map((entry) =>
-    el('tr', {}, [
-      el('td', {}, [formatDateTime(entry.entry_date)]),
-      el('td', {}, [entry.item_name]),
-      el('td', { class: 'cell-number' }, [String(entry.weight_kg)]),
-      el('td', { class: 'cell-number' }, [formatRs(entry.rate_per_kg)]),
-      el('td', { class: 'cell-number cell-strong' }, [formatRs(entry.line_total)]),
-    ])
-  );
-  const total = entries.reduce((sum, e) => sum + e.line_total, 0);
-  return el('table', { class: 'data-table' }, [
-    el('thead', {}, [
-      el('tr', {}, [
-        el('th', {}, ['Date']),
-        el('th', {}, ['Item']),
-        el('th', { class: 'th-right' }, ['KG']),
-        el('th', { class: 'th-right' }, ['Rate']),
-        el('th', { class: 'th-right' }, ['Total']),
-      ]),
-    ]),
-    el('tbody', {}, rows),
-    el('tfoot', {}, [
-      el('tr', {}, [
-        el('td', { colspan: '4' }, ['Unbilled subtotal']),
-        el('td', { class: 'cell-number cell-strong' }, [formatRs(total)]),
-      ]),
+function entryEditRow(
+  entry: Entry,
+  partyType: PartyType,
+  partyId: number,
+  onDone: (changed: boolean) => void
+): HTMLElement {
+  const itemInput = el('input', { type: 'text', value: entry.item_name, maxlength: '60' }) as HTMLInputElement;
+  const kgInput = el('input', {
+    type: 'number',
+    step: '0.01',
+    min: '0',
+    value: String(entry.weight_kg),
+  }) as HTMLInputElement;
+  const rateInput = el('input', {
+    type: 'number',
+    step: '0.01',
+    min: '0',
+    value: String(entry.rate_per_kg),
+  }) as HTMLInputElement;
+  const dateInput = el('input', {
+    type: 'date',
+    value: entry.entry_date.split(' ')[0],
+  }) as HTMLInputElement;
+
+  const errorSlot = el('div', { class: 'form-error-slot' });
+
+  const saveBtn = el('button', { class: 'btn btn-primary btn-small', type: 'button' }, ['Save']);
+  const cancelBtn = el('button', { class: 'btn btn-secondary btn-small', type: 'button' }, ['Cancel']);
+
+  cancelBtn.addEventListener('click', () => onDone(false));
+
+  saveBtn.addEventListener('click', async () => {
+    errorSlot.replaceChildren();
+
+    const weightKg = Number(kgInput.value);
+    const ratePerKg = Number(rateInput.value);
+    if (!Number.isFinite(weightKg) || weightKg <= 0) {
+      errorSlot.append(errorBanner('Weight (KG) must be greater than zero.'));
+      return;
+    }
+    if (!Number.isFinite(ratePerKg) || ratePerKg <= 0) {
+      errorSlot.append(errorBanner('Rate per KG must be greater than zero.'));
+      return;
+    }
+    if (!dateInput.value) {
+      errorSlot.append(errorBanner('Date is required.'));
+      return;
+    }
+
+    (saveBtn as HTMLButtonElement).disabled = true;
+    try {
+      await window.khata.updateEntry({
+        partyType,
+        partyId,
+        entryId: entry.id,
+        itemName: itemInput.value.trim() || 'Chicken',
+        weightKg,
+        ratePerKg,
+        entryDate: dateInput.value,
+      });
+      onDone(true);
+    } catch (err) {
+      errorSlot.replaceChildren(errorBanner(errorMessage(err)));
+      (saveBtn as HTMLButtonElement).disabled = false;
+    }
+  });
+
+  return el('tr', { class: 'entry-edit-row' }, [
+    el('td', {}, [dateInput]),
+    el('td', {}, [itemInput]),
+    el('td', {}, [kgInput]),
+    el('td', {}, [rateInput]),
+    el('td', {}, []),
+    el('td', { class: 'cell-actions' }, [
+      el('div', { class: 'entry-edit-actions' }, [saveBtn, cancelBtn]),
+      errorSlot,
     ]),
   ]);
+}
+
+function renderEntriesTable(
+  wrap: HTMLElement,
+  entries: Entry[],
+  partyType: PartyType,
+  partyId: number,
+  onChanged: () => void
+): void {
+  if (entries.length === 0) {
+    mount(wrap, emptyState('No unbilled entries yet.'));
+    return;
+  }
+
+  let editingId: number | null = null;
+
+  function render() {
+    const rows: HTMLElement[] = [];
+    for (const entry of entries) {
+      if (entry.id === editingId) {
+        rows.push(
+          entryEditRow(entry, partyType, partyId, (changed) => {
+            editingId = null;
+            if (changed) {
+              onChanged();
+            } else {
+              render();
+            }
+          })
+        );
+      } else {
+        const editBtn = el('button', { class: 'btn btn-secondary btn-small', type: 'button' }, ['Edit']);
+        editBtn.addEventListener('click', () => {
+          editingId = entry.id;
+          render();
+        });
+        rows.push(
+          el('tr', {}, [
+            el('td', {}, [formatDateTime(entry.entry_date)]),
+            el('td', {}, [entry.item_name]),
+            el('td', { class: 'cell-number' }, [String(entry.weight_kg)]),
+            el('td', { class: 'cell-number' }, [formatRs(entry.rate_per_kg)]),
+            el('td', { class: 'cell-number cell-strong' }, [formatRs(entry.line_total)]),
+            el('td', { class: 'cell-actions' }, [editBtn]),
+          ])
+        );
+      }
+    }
+
+    const total = entries.reduce((sum, e) => sum + e.line_total, 0);
+    mount(
+      wrap,
+      el('table', { class: 'data-table' }, [
+        el('thead', {}, [
+          el('tr', {}, [
+            el('th', {}, ['Date']),
+            el('th', {}, ['Item']),
+            el('th', { class: 'th-right' }, ['KG']),
+            el('th', { class: 'th-right' }, ['Rate']),
+            el('th', { class: 'th-right' }, ['Total']),
+            el('th', {}, ['']),
+          ]),
+        ]),
+        el('tbody', {}, rows),
+        el('tfoot', {}, [
+          el('tr', {}, [
+            el('td', { colspan: '5' }, ['Unbilled subtotal']),
+            el('td', { class: 'cell-number cell-strong' }, [formatRs(total)]),
+          ]),
+        ]),
+      ])
+    );
+  }
+
+  render();
 }
 
 function paymentsTable(payments: Payment[]): HTMLElement {
@@ -361,7 +482,7 @@ export async function renderPartyProfile(
 
   function refreshStatic() {
     mount(heroWrap, dueHero(party, partyType));
-    mount(entriesWrap, entriesTable(entries));
+    renderEntriesTable(entriesWrap, entries, partyType, partyId, reload);
     mount(paymentsWrap, paymentsTable(payments));
     mount(billsWrap, billsTable(bills, partyType));
     mount(generateBillWrap, generateBillPanel(partyType, partyId, entries, party.current_due));

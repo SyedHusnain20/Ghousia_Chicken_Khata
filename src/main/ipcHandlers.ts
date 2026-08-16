@@ -6,6 +6,7 @@ import type {
   GetPartyRequest,
   ListPartiesRequest,
   AddEntryRequest,
+  UpdateEntryRequest,
   ListUnbilledEntriesRequest,
   GenerateBillRequest,
   ListBillsForPartyRequest,
@@ -24,6 +25,7 @@ import {
   getParty,
   getAllParties,
   addEntry,
+  updateEntry,
   getUnbilledEntries,
   generateBill,
   getBillsForParty,
@@ -65,6 +67,10 @@ export function registerIpcHandlers(db: Database.Database): void {
 
   ipcMain.handle(IpcChannels.ENTRY_ADD, (_event, req: AddEntryRequest) => {
     return addEntry(db, req.partyType, req.partyId, req.itemName, req.weightKg, req.ratePerKg, req.entryDate);
+  });
+
+  ipcMain.handle(IpcChannels.ENTRY_UPDATE, (_event, req: UpdateEntryRequest) => {
+    updateEntry(db, req.partyType, req.partyId, req.entryId, req.itemName, req.weightKg, req.ratePerKg, req.entryDate);
   });
 
   ipcMain.handle(IpcChannels.ENTRY_LIST_UNBILLED, (_event, req: ListUnbilledEntriesRequest) => {
