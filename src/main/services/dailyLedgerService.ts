@@ -1,6 +1,6 @@
 import Database from 'better-sqlite3';
 import { DailyLedger, DailyLedgerDetail, DailyLedgerSummary, EntryWithPartyName } from '../types';
-import { round2, DATE_ONLY_RE, pakistanNow } from './partyService';
+import { floorMoney, DATE_ONLY_RE, pakistanNow } from './partyService';
 
 function assertValidDate(date: string): void {
   if (!DATE_ONLY_RE.test(date)) {
@@ -88,12 +88,12 @@ export function getDailyLedger(db: Database.Database, ledgerDate: string): Daily
   const supplierPurchases = getSupplierPurchasesForDate(db, ledgerDate);
   const khataSales = getKhataSalesForDate(db, ledgerDate);
 
-  const supplierPurchasesTotal = round2(supplierPurchases.reduce((sum, e) => sum + e.line_total, 0));
-  const khataSalesTotal = round2(khataSales.reduce((sum, e) => sum + e.line_total, 0));
+  const supplierPurchasesTotal = floorMoney(supplierPurchases.reduce((sum, e) => sum + e.line_total, 0));
+  const khataSalesTotal = floorMoney(khataSales.reduce((sum, e) => sum + e.line_total, 0));
 
-  const totalIncome = round2(khataSalesTotal + ledger.cash_customer_income);
-  const totalExpenses = round2(supplierPurchasesTotal + ledger.extra_expenses);
-  const profitLoss = round2(totalIncome - totalExpenses);
+  const totalIncome = floorMoney(khataSalesTotal + ledger.cash_customer_income);
+  const totalExpenses = floorMoney(supplierPurchasesTotal + ledger.extra_expenses);
+  const profitLoss = floorMoney(totalIncome - totalExpenses);
 
   return {
     ...ledger,
@@ -140,7 +140,7 @@ export function updateDailyLedgerFields(
     `UPDATE daily_ledgers
      SET cash_customer_income = ?, extra_expenses = ?, updated_at = ?
      WHERE ledger_date = ?`
-  ).run(round2(cashCustomerIncome), round2(extraExpenses), updatedAt, ledgerDate);
+  ).run(floorMoney(cashCustomerIncome), floorMoney(extraExpenses), updatedAt, ledgerDate);
 
   return db.prepare('SELECT * FROM daily_ledgers WHERE ledger_date = ?').get(ledgerDate) as DailyLedger;
 }
@@ -175,27 +175,27 @@ export function listDailyLedgers(
   const ledgers = db.prepare(query).all(...params) as DailyLedger[];
 
   return ledgers.map((ledger) => {
-    const supplierTotal = round2(
+    const supplierTotal = floorMoney(
       (
         db
           .prepare(`SELECT COALESCE(SUM(line_total), 0) AS total FROM supplier_entries WHERE date(entry_date) = ?`)
           .get(ledger.ledger_date) as { total: number }
       ).total
     );
-    const khataTotal = round2(
+    const khataTotal = floorMoney(
       (
         db
           .prepare(`SELECT COALESCE(SUM(line_total), 0) AS total FROM customer_entries WHERE date(entry_date) = ?`)
           .get(ledger.ledger_date) as { total: number }
       ).total
     );
-    const totalIncome = round2(khataTotal + ledger.cash_customer_income);
-    const totalExpenses = round2(supplierTotal + ledger.extra_expenses);
+    const totalIncome = floorMoney(khataTotal + ledger.cash_customer_income);
+    const totalExpenses = floorMoney(supplierTotal + ledger.extra_expenses);
     return {
       ledger_date: ledger.ledger_date,
       total_income: totalIncome,
       total_expenses: totalExpenses,
-      profit_loss: round2(totalIncome - totalExpenses),
+      profit_loss: floorMoney(totalIncome - totalExpenses),
     };
   });
 }
@@ -214,12 +214,12 @@ export function getMonthlySummary(
   const monthPrefix = `${year}-${String(month).padStart(2, '0')}`;
   const days = listDailyLedgers(db, `${monthPrefix}-01`, `${monthPrefix}-31`);
 
-  const totalIncome = round2(days.reduce((sum, d) => sum + d.total_income, 0));
-  const totalExpenses = round2(days.reduce((sum, d) => sum + d.total_expenses, 0));
+  const totalIncome = floorMoney(days.reduce((sum, d) => sum + d.total_income, 0));
+  const totalExpenses = floorMoney(days.reduce((sum, d) => sum + d.total_expenses, 0));
 
   return {
     total_income: totalIncome,
     total_expenses: totalExpenses,
-    total_profit_loss: round2(totalIncome - totalExpenses),
+    total_profit_loss: floorMoney(totalIncome - totalExpenses),
   };
 }

@@ -32,11 +32,13 @@ function dateBar(ledgerDate: string): HTMLElement {
   ]);
 }
 
-// Rounds to 2dp without pulling in main's round2 (that helper lives in a
-// file that imports better-sqlite3 - fine for main, but that import must
-// never end up in the renderer bundle).
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
+// Floors to a whole rupee, without pulling in main's floorMoney (that
+// helper lives in a file that imports better-sqlite3 - fine for main, but
+// that import must never end up in the renderer bundle). Every money
+// amount in this app is a whole number of rupees - see partyService.ts's
+// floorMoney for the full rationale.
+function floorMoney(n: number): number {
+  return Math.floor(n);
 }
 
 interface AggregatedPartyRow {
@@ -62,8 +64,10 @@ function aggregateByParty(rows: EntryWithPartyName[]): AggregatedPartyRow[] {
   for (const r of rows) {
     const existing = totals.get(r.party_id);
     if (existing) {
-      existing.weight_kg = round2(existing.weight_kg + r.weight_kg);
-      existing.line_total = round2(existing.line_total + r.line_total);
+      // weight_kg is a physical quantity, not money - never floored, only
+      // summed exactly (JS float addition here is fine at this scale).
+      existing.weight_kg = existing.weight_kg + r.weight_kg;
+      existing.line_total = floorMoney(existing.line_total + r.line_total);
     } else {
       totals.set(r.party_id, { party_name: r.party_name, weight_kg: r.weight_kg, line_total: r.line_total });
       order.push(r.party_id);
@@ -76,7 +80,7 @@ function aggregateByParty(rows: EntryWithPartyName[]): AggregatedPartyRow[] {
       party_name: t.party_name,
       weight_kg: t.weight_kg,
       line_total: t.line_total,
-      rate_per_kg: t.weight_kg > 0 ? round2(t.line_total / t.weight_kg) : 0,
+      rate_per_kg: t.weight_kg > 0 ? floorMoney(t.line_total / t.weight_kg) : 0,
     };
   });
 }

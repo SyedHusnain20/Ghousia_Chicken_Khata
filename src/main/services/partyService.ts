@@ -90,7 +90,7 @@ export function addEntry(
   }
 
   const t = tables(partyType);
-  const lineTotal = round2(weightKg * ratePerKg);
+  const lineTotal = floorMoney(weightKg * ratePerKg);
 
   const run = db.transaction(() => {
     const now = pakistanNow();
@@ -103,7 +103,7 @@ export function addEntry(
     const entryId = result.lastInsertRowid as number;
 
     const party = getParty(db, partyType, partyId);
-    const newDue = round2(party.current_due + lineTotal);
+    const newDue = floorMoney(party.current_due + lineTotal);
     db.prepare(`UPDATE ${t.party} SET current_due = ? WHERE id = ?`).run(newDue, partyId);
 
     return entryId;
@@ -149,7 +149,7 @@ export function updateEntry(
   }
 
   const t = tables(partyType);
-  const newLineTotal = round2(weightKg * ratePerKg);
+  const newLineTotal = floorMoney(weightKg * ratePerKg);
 
   db.transaction(() => {
     const existing = db
@@ -171,8 +171,8 @@ export function updateEntry(
     ).run(newEntryDate, itemName, weightKg, ratePerKg, newLineTotal, entryId);
 
     const party = getParty(db, partyType, partyId);
-    const dueAdjustment = round2(newLineTotal - existing.line_total);
-    const newDue = round2(party.current_due + dueAdjustment);
+    const dueAdjustment = floorMoney(newLineTotal - existing.line_total);
+    const newDue = floorMoney(party.current_due + dueAdjustment);
     db.prepare(`UPDATE ${t.party} SET current_due = ? WHERE id = ?`).run(newDue, partyId);
   })();
 }
@@ -201,10 +201,10 @@ export function generateBill(
       throw new Error('No unbilled entries to generate a bill from');
     }
 
-    const subtotal = round2(pending.reduce((sum, e) => sum + e.line_total, 0));
+    const subtotal = floorMoney(pending.reduce((sum, e) => sum + e.line_total, 0));
     // current_due already includes this subtotal (added per-entry in
     // addEntry), so "before this bill's entries" is current_due minus it.
-    const previousDue = round2(party.current_due - subtotal);
+    const previousDue = floorMoney(party.current_due - subtotal);
     const totalDueAfterBill = party.current_due;
 
     const now = pakistanNow();
@@ -272,7 +272,7 @@ export function recordPayment(
     const result = insertPayment.run(partyType, partyId, billId, amount, note, paidAt);
 
     const party = getParty(db, partyType, partyId);
-    const newDue = round2(party.current_due - amount);
+    const newDue = floorMoney(party.current_due - amount);
     db.prepare(`UPDATE ${t.party} SET current_due = ? WHERE id = ?`).run(newDue, partyId);
 
     if (billId !== null) {
@@ -359,6 +359,13 @@ export function getBillById(db: Database.Database, partyType: PartyType, billId:
   };
 }
 
-export function round2(n: number): number {
-  return Math.round(n * 100) / 100;
+// Every money figure in this app - line totals, dues, bill amounts,
+// payments, ledger totals - is a whole number of rupees. No paisas
+// anywhere: 70.2 KG at Rs. 302/KG is Rs. 21,200 (21,200.4 floored), not
+// Rs. 21,200.40. This is the single place that decision is made; every
+// money calculation in the app routes through this function (or the
+// renderer-side copies in dailyLedger.ts/format.ts, which can't import
+// this file directly - see their own comments).
+export function floorMoney(n: number): number {
+  return Math.floor(n);
 }

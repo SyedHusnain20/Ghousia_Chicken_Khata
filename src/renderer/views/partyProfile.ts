@@ -4,6 +4,15 @@ import { emptyState, errorBanner, errorMessage, loadingState } from '../componen
 import { navigate } from '../router';
 import type { BillListItem, Entry, Party, PartyType, Payment } from '../../main/types';
 
+// Floors to a whole rupee, without pulling in main's floorMoney (that
+// helper lives in a file that imports better-sqlite3 - fine for main, but
+// that import must never end up in the renderer bundle). Every money
+// amount in this app is a whole number of rupees - see partyService.ts's
+// floorMoney for the full rationale.
+function floorMoney(n: number): number {
+  return Math.floor(n);
+}
+
 const COPY: Record<
   PartyType,
   { title: string; entryVerb: string; entryNoun: string; listPath: string; addEntryLabel: string }
@@ -57,7 +66,7 @@ function addEntryForm(partyType: PartyType, partyId: number, onSaved: () => void
   function updatePreview() {
     const kg = Number(kgInput.value);
     const rate = Number(rateInput.value);
-    const total = Number.isFinite(kg) && Number.isFinite(rate) ? kg * rate : 0;
+    const total = Number.isFinite(kg) && Number.isFinite(rate) ? floorMoney(kg * rate) : 0;
     totalPreview.textContent = formatRs(total);
   }
   kgInput.addEventListener('input', updatePreview);
@@ -395,7 +404,7 @@ function generateBillPanel(
   // total the bill will show is simply the current due - not
   // currentDue + subtotal, which would double-count them.
   const grandTotal = currentDue;
-  const previousDue = Math.round((currentDue - subtotal) * 100) / 100;
+  const previousDue = floorMoney(currentDue - subtotal);
 
   const paymentInput = el('input', { type: 'number', step: '0.01', min: '0', placeholder: '0 (optional)' }) as HTMLInputElement;
   const errorSlot = el('div', { class: 'form-error-slot' });

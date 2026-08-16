@@ -2,22 +2,28 @@
 // same way - a shopkeeper should never see "8000" on one screen and
 // "8,000.00" on another for the same figure.
 
+// Every money amount in this app is a whole number of rupees - no paisas
+// anywhere (70.2 KG at Rs. 302/KG is Rs. 21,200, not Rs. 21,200.40). The
+// backend already floors every stored amount (see partyService.ts's
+// floorMoney), but flooring again here too means this is true no matter
+// what a given caller passes in - the display layer never shows decimals.
 const money = new Intl.NumberFormat('en-PK', {
   minimumFractionDigits: 0,
-  maximumFractionDigits: 2,
+  maximumFractionDigits: 0,
 });
 
 export function formatRs(amount: number): string {
-  return `Rs. ${money.format(amount)}`;
+  return `Rs. ${money.format(Math.floor(amount))}`;
 }
 
 // Due amounts are shown with an explicit sign word rather than a bare
 // negative number - "credit" is much clearer to a non-technical user than
 // "-3600".
 export function formatDue(amount: number): { text: string; kind: 'due' | 'credit' | 'clear' } {
-  if (Math.abs(amount) < 0.01) return { text: formatRs(0), kind: 'clear' };
-  if (amount > 0) return { text: formatRs(amount), kind: 'due' };
-  return { text: `${formatRs(Math.abs(amount))} credit`, kind: 'credit' };
+  const floored = Math.floor(amount);
+  if (floored === 0) return { text: formatRs(0), kind: 'clear' };
+  if (floored > 0) return { text: formatRs(floored), kind: 'due' };
+  return { text: `${formatRs(Math.abs(floored))} credit`, kind: 'credit' };
 }
 
 // Profit/Loss is never shown as a bare signed number - the shopkeeper
@@ -30,13 +36,14 @@ export function formatProfitLoss(amount: number): {
   short: string;
   kind: 'due' | 'credit' | 'clear';
 } {
-  if (Math.abs(amount) < 0.01) {
+  const floored = Math.floor(amount);
+  if (floored === 0) {
     return { headline: 'Break even', short: formatRs(0), kind: 'clear' };
   }
-  if (amount > 0) {
-    return { headline: `PROFIT: ${formatRs(amount)}`, short: `+${formatRs(amount)}`, kind: 'credit' };
+  if (floored > 0) {
+    return { headline: `PROFIT: ${formatRs(floored)}`, short: `+${formatRs(floored)}`, kind: 'credit' };
   }
-  return { headline: `LOSS: ${formatRs(Math.abs(amount))}`, short: `-${formatRs(Math.abs(amount))}`, kind: 'due' };
+  return { headline: `LOSS: ${formatRs(Math.abs(floored))}`, short: `-${formatRs(Math.abs(floored))}`, kind: 'due' };
 }
 
 export function todayIso(): string {

@@ -2,7 +2,7 @@ import { app, BrowserWindow, dialog, shell } from 'electron';
 import fs from 'fs';
 import path from 'path';
 import Database from 'better-sqlite3';
-import { getAllParties, pakistanNow } from '../services/partyService';
+import { getAllParties, pakistanNow, floorMoney } from '../services/partyService';
 import type { Party } from '../types';
 
 // Mirrors src/renderer/shopConfig.ts - kept as a local constant rather than
@@ -10,9 +10,9 @@ import type { Party } from '../types';
 // separate TypeScript projects; see tsconfig.json's renderer exclusion).
 const SHOP_NAME_EN = 'Ghousia Chicken Shop';
 
-const money = new Intl.NumberFormat('en-PK', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+const money = new Intl.NumberFormat('en-PK', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 function formatRs(amount: number): string {
-  return `Rs. ${money.format(amount)}`;
+  return `Rs. ${money.format(floorMoney(amount))}`;
 }
 
 function escapeHtml(value: string): string {

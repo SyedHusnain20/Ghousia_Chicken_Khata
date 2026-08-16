@@ -10,7 +10,7 @@ const TITLE: Record<PartyType, string> = {
 };
 
 function receiptMarkup(bill: BillDetail): HTMLElement {
-  const paymentNow = Math.round((bill.total_due_after_bill - bill.remaining_due) * 100) / 100;
+  const paymentNow = Math.floor(bill.total_due_after_bill - bill.remaining_due);
 
   const itemRows = bill.items.map((item) =>
     el('tr', {}, [
