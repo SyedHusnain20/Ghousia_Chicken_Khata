@@ -5,6 +5,7 @@ import type {
   CreatePartyRequest,
   GetPartyRequest,
   ListPartiesRequest,
+  DeletePartyRequest,
   AddEntryRequest,
   UpdateEntryRequest,
   ListUnbilledEntriesRequest,
@@ -24,6 +25,7 @@ import {
   createParty,
   getParty,
   getAllParties,
+  deleteParty,
   addEntry,
   updateEntry,
   getUnbilledEntries,
@@ -63,6 +65,10 @@ export function registerIpcHandlers(db: Database.Database): void {
 
   ipcMain.handle(IpcChannels.PARTY_LIST, (_event, req: ListPartiesRequest) => {
     return getAllParties(db, req.partyType);
+  });
+
+  ipcMain.handle(IpcChannels.PARTY_DELETE, (_event, req: DeletePartyRequest) => {
+    deleteParty(db, req.partyType, req.partyId);
   });
 
   ipcMain.handle(IpcChannels.ENTRY_ADD, (_event, req: AddEntryRequest) => {

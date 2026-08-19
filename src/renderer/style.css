@@ -178,6 +178,25 @@ a {
   color: var(--color-primary);
 }
 
+.profile-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.profile-header-row .back-link {
+  margin-bottom: 0;
+}
+
+.profile-header-actions {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
 /* ---------------- Buttons ---------------- */
 
 .btn {

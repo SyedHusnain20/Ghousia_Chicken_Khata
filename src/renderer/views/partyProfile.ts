@@ -39,6 +39,33 @@ function backLink(partyType: PartyType): HTMLElement {
   return link;
 }
 
+function deletePartyControls(party: Party, partyType: PartyType): HTMLElement {
+  const copy = COPY[partyType];
+  const errorSlot = el('div', { class: 'form-error-slot' });
+  const deleteBtn = el('button', { class: 'btn btn-danger btn-small', type: 'button' }, [
+    `Delete ${copy.title}`,
+  ]) as HTMLButtonElement;
+
+  deleteBtn.addEventListener('click', async () => {
+    errorSlot.replaceChildren();
+    const confirmed = window.confirm(
+      `Delete ${party.name}? This can\u2019t be undone. This only works if they have no outstanding balance and no transaction history yet.`
+    );
+    if (!confirmed) return;
+
+    deleteBtn.disabled = true;
+    try {
+      await window.khata.deleteParty({ partyType, partyId: party.id });
+      navigate(copy.listPath);
+    } catch (err) {
+      errorSlot.replaceChildren(errorBanner(errorMessage(err)));
+      deleteBtn.disabled = false;
+    }
+  });
+
+  return el('div', { class: 'profile-header-actions' }, [deleteBtn, errorSlot]);
+}
+
 function dueHero(party: Party, partyType: PartyType): HTMLElement {
   const due = formatDue(party.current_due);
   const label = partyType === 'supplier' ? 'You owe' : 'Owes you';
@@ -488,6 +515,7 @@ export async function renderPartyProfile(
   const generateBillWrap = el('div', {});
   const entryFormWrap = el('div', {});
   const paymentFormWrap = el('div', {});
+  const deleteWrap = el('div', {});
 
   function refreshStatic() {
     mount(heroWrap, dueHero(party, partyType));
@@ -495,6 +523,7 @@ export async function renderPartyProfile(
     mount(paymentsWrap, paymentsTable(payments));
     mount(billsWrap, billsTable(bills, partyType));
     mount(generateBillWrap, generateBillPanel(partyType, partyId, entries, party.current_due));
+    mount(deleteWrap, deletePartyControls(party, partyType));
   }
 
   async function reload() {
@@ -518,7 +547,7 @@ export async function renderPartyProfile(
 
   mount(
     container,
-    backLink(partyType),
+    el('div', { class: 'profile-header-row' }, [backLink(partyType), deleteWrap]),
     heroWrap,
     el('div', { class: 'profile-columns' }, [
       el('section', { class: 'panel' }, [el('h2', {}, [copy.entryVerb]), entryFormWrap]),

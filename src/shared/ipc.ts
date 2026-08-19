@@ -19,6 +19,7 @@ export const IpcChannels = {
   PARTY_CREATE: 'party:create',
   PARTY_GET: 'party:get',
   PARTY_LIST: 'party:list',
+  PARTY_DELETE: 'party:delete',
   ENTRY_ADD: 'entry:add',
   ENTRY_UPDATE: 'entry:update',
   ENTRY_LIST_UNBILLED: 'entry:list-unbilled',
@@ -51,6 +52,11 @@ export interface CreatePartyRequest {
 }
 
 export interface GetPartyRequest {
+  partyType: PartyType;
+  partyId: number;
+}
+
+export interface DeletePartyRequest {
   partyType: PartyType;
   partyId: number;
 }
@@ -191,6 +197,7 @@ export interface KhataApi {
   createParty(req: CreatePartyRequest): Promise<number>;
   getParty(req: GetPartyRequest): Promise<Party>;
   listParties(req: ListPartiesRequest): Promise<Party[]>;
+  deleteParty(req: DeletePartyRequest): Promise<void>;
   addEntry(req: AddEntryRequest): Promise<number>;
   updateEntry(req: UpdateEntryRequest): Promise<void>;
   listUnbilledEntries(req: ListUnbilledEntriesRequest): Promise<Entry[]>;

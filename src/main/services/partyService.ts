@@ -37,6 +37,49 @@ export function getAllParties(db: Database.Database, partyType: PartyType): Part
   return db.prepare(`SELECT * FROM ${t.party} ORDER BY name COLLATE NOCASE`).all() as Party[];
 }
 
+/**
+ * Deletes a party, but only when it's safe to do so with zero risk to the
+ * books: no outstanding balance, and no transaction history whatsoever.
+ * Entries/bills/payments are never deleted themselves (even if we tried,
+ * that would silently change the totals on a Daily Ledger date that's
+ * already in the past, or falsify a bill the party may already have a
+ * printed copy of) - so a party with any history at all must stay on
+ * record. In practice this means delete is for cleaning up a party that
+ * was created by mistake (wrong name, duplicate, etc.) and never actually
+ * used for anything yet.
+ */
+export function deleteParty(db: Database.Database, partyType: PartyType, partyId: number): void {
+  const t = tables(partyType);
+  const party = getParty(db, partyType, partyId);
+
+  if (party.current_due !== 0) {
+    const owed = party.current_due > 0 ? 'has an outstanding balance' : 'is owed a credit balance';
+    throw new Error(
+      `Can't delete ${party.name} - they ${owed} of Rs. ${Math.abs(party.current_due)}. Settle it to zero first.`
+    );
+  }
+
+  const entryCount = (
+    db.prepare(`SELECT COUNT(*) as c FROM ${t.entries} WHERE ${t.fk} = ?`).get(partyId) as { c: number }
+  ).c;
+  const billCount = (
+    db.prepare(`SELECT COUNT(*) as c FROM ${t.bills} WHERE ${t.fk} = ?`).get(partyId) as { c: number }
+  ).c;
+  const paymentCount = (
+    db.prepare(`SELECT COUNT(*) as c FROM payments WHERE party_type = ? AND party_id = ?`).get(partyType, partyId) as {
+      c: number;
+    }
+  ).c;
+
+  if (entryCount > 0 || billCount > 0 || paymentCount > 0) {
+    throw new Error(
+      `Can't delete ${party.name} - they have transaction history on record, which needs to stay in place to keep past bills and the Daily Ledger accurate.`
+    );
+  }
+
+  db.prepare(`DELETE FROM ${t.party} WHERE id = ?`).run(partyId);
+}
+
 export const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 // Pakistan Standard Time is a fixed UTC+5 offset with no daylight saving,
