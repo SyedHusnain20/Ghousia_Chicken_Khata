@@ -1,6 +1,7 @@
 import {
   PartyType,
   Party,
+  PartyWithActivity,
   Entry,
   Bill,
   BillListItem,
@@ -19,6 +20,7 @@ export const IpcChannels = {
   PARTY_CREATE: 'party:create',
   PARTY_GET: 'party:get',
   PARTY_LIST: 'party:list',
+  PARTY_LIST_WITH_ACTIVITY: 'party:list-with-activity',
   PARTY_DELETE: 'party:delete',
   ENTRY_ADD: 'entry:add',
   ENTRY_UPDATE: 'entry:update',
@@ -208,6 +210,7 @@ export interface KhataApi {
   createParty(req: CreatePartyRequest): Promise<number>;
   getParty(req: GetPartyRequest): Promise<Party>;
   listParties(req: ListPartiesRequest): Promise<Party[]>;
+  listPartiesWithActivity(req: ListPartiesRequest): Promise<PartyWithActivity[]>;
   deleteParty(req: DeletePartyRequest): Promise<void>;
   addEntry(req: AddEntryRequest): Promise<number>;
   updateEntry(req: UpdateEntryRequest): Promise<void>;

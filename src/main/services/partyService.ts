@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3';
-import { PartyType, Party, Entry, Bill, BillListItem, BillDetail, Payment } from '../types';
+import { PartyType, Party, PartyWithActivity, Entry, Bill, BillListItem, BillDetail, Payment } from '../types';
 
 // Table names differ by party type but the logic is identical, so we
 // resolve table names once per call rather than duplicating every function.
@@ -35,6 +35,24 @@ export function getParty(db: Database.Database, partyType: PartyType, partyId: n
 export function getAllParties(db: Database.Database, partyType: PartyType): Party[] {
   const t = tables(partyType);
   return db.prepare(`SELECT * FROM ${t.party} ORDER BY name COLLATE NOCASE`).all() as Party[];
+}
+
+/**
+ * Same data as getAllParties, plus each party's most recent purchase date
+ * (across ALL entries - billed and unbilled alike, since "did they
+ * recently buy something" is about the purchase itself, not whether it's
+ * been billed yet). Used by the customer list's recency sorting and
+ * "inactive with balance" grouping. No default ORDER BY here - sorting is
+ * the caller's job, since different views want different orders.
+ */
+export function getAllPartiesWithActivity(db: Database.Database, partyType: PartyType): PartyWithActivity[] {
+  const t = tables(partyType);
+  return db
+    .prepare(
+      `SELECT p.*, (SELECT MAX(e.entry_date) FROM ${t.entries} e WHERE e.${t.fk} = p.id) as last_purchase_date
+       FROM ${t.party} p`
+    )
+    .all() as PartyWithActivity[];
 }
 
 /**

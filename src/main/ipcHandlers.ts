@@ -25,6 +25,7 @@ import {
   createParty,
   getParty,
   getAllParties,
+  getAllPartiesWithActivity,
   deleteParty,
   addEntry,
   updateEntry,
@@ -65,6 +66,10 @@ export function registerIpcHandlers(db: Database.Database): void {
 
   ipcMain.handle(IpcChannels.PARTY_LIST, (_event, req: ListPartiesRequest) => {
     return getAllParties(db, req.partyType);
+  });
+
+  ipcMain.handle(IpcChannels.PARTY_LIST_WITH_ACTIVITY, (_event, req: ListPartiesRequest) => {
+    return getAllPartiesWithActivity(db, req.partyType);
   });
 
   ipcMain.handle(IpcChannels.PARTY_DELETE, (_event, req: DeletePartyRequest) => {

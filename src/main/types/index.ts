@@ -9,6 +9,14 @@ export interface Party {
   created_at: string;
 }
 
+// Party plus their most recent purchase date - used by the customer list's
+// "sort by recent activity" view, kept separate from the plain Party type
+// (which everything else already relies on) rather than adding this field
+// everywhere.
+export interface PartyWithActivity extends Party {
+  last_purchase_date: string | null; // most recent entry_date across ALL entries (billed + unbilled); null if they've never purchased
+}
+
 export interface Entry {
   id: number;
   entry_date: string;
