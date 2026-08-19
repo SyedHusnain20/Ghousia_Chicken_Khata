@@ -42,6 +42,7 @@ export const IpcChannels = {
   STORAGE_CHOOSE_RESTORE_FILE: 'storage:choose-restore-file',
   STORAGE_CONFIRM_RESTORE: 'storage:confirm-restore',
   REPORT_CUSTOMERS_CLOSING_PDF: 'report:customers-closing-pdf',
+  REPORT_SHARE_BILL_IMAGE: 'report:share-bill-image',
 } as const;
 
 export interface CreatePartyRequest {
@@ -116,6 +117,16 @@ export interface ListBillsForPartyRequest {
 export interface GetBillRequest {
   partyType: PartyType;
   billId: number;
+}
+
+export interface ShareBillImageRequest {
+  partyType: PartyType;
+  billId: number;
+}
+
+export interface ShareBillImageResponse {
+  savedPath: string;
+  whatsappUrl: string | null;
 }
 
 export interface ListAllBillsRequest {
@@ -232,4 +243,10 @@ export interface KhataApi {
   // opens the resulting PDF. Resolves to the saved file path, or null if
   // the shopkeeper cancelled the save dialog.
   generateCustomersClosingPdf(): Promise<string | null>;
+  // Builds the bill as a PNG, copies it to the clipboard, saves a copy to
+  // disk, and opens WhatsApp to the party's chat if a contact number is on
+  // file. The shopkeeper still has to paste (Ctrl+V) and hit send inside
+  // WhatsApp themselves - no API exists for a fully offline app to do that
+  // last step automatically.
+  shareBillImage(req: ShareBillImageRequest): Promise<ShareBillImageResponse>;
 }

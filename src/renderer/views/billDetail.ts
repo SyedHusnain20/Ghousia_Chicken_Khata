@@ -1,6 +1,6 @@
 import { el, mount } from '../dom';
 import { formatDate, formatDateTime, formatRs } from '../format';
-import { button, errorBanner, errorMessage, loadingState } from '../components';
+import { button, errorBanner, errorMessage, loadingState, successBanner } from '../components';
 import { SHOP_NAME_EN, SHOP_NAME_UR } from '../shopConfig';
 import type { BillDetail, PartyType } from '../../main/types';
 
@@ -90,13 +90,37 @@ export async function renderBillDetail(
 
   const printBtn = button('Print bill', () => window.print());
 
+  const shareStatus = el('div', { class: 'form-error-slot no-print' });
+  const shareBtn = button('Share to WhatsApp', async () => {
+    shareStatus.replaceChildren();
+    shareBtn.disabled = true;
+    const originalLabel = shareBtn.textContent;
+    shareBtn.textContent = 'Preparing image\u2026';
+    try {
+      const result = await window.khata.shareBillImage({ partyType, billId: bill.id });
+      shareStatus.replaceChildren(
+        successBanner(
+          result.whatsappUrl
+            ? `Bill image copied and WhatsApp opened for ${bill.party_name}. Press Ctrl+V in the chat, then Send.`
+            : `Bill image copied to clipboard. Open WhatsApp, pick ${bill.party_name}\u2019s chat (no phone number on file to auto-open it), and press Ctrl+V, then Send.`
+        )
+      );
+    } catch (err) {
+      shareStatus.replaceChildren(errorBanner(errorMessage(err)));
+    } finally {
+      shareBtn.disabled = false;
+      shareBtn.textContent = originalLabel;
+    }
+  }, 'secondary');
+
   mount(
     container,
     el('div', { class: 'no-print' }, [backLink]),
     el('div', { class: 'page-header no-print' }, [
       el('h1', {}, [TITLE[bill.party_type]]),
-      el('div', { class: 'page-header-actions' }, [printBtn]),
+      el('div', { class: 'page-header-actions' }, [printBtn, shareBtn]),
     ]),
+    shareStatus,
     receiptMarkup(bill)
   );
 }
