@@ -49,8 +49,8 @@ function receiptMarkup(bill: BillDetail): HTMLElement {
       el('tbody', {}, itemRows),
     ]),
     el('div', { class: 'receipt-totals' }, [
-      el('div', { class: 'receipt-total-row' }, [el('span', {}, ['Previous due']), el('span', {}, [formatRs(bill.previous_due)])]),
       el('div', { class: 'receipt-total-row' }, [el('span', {}, ['This bill\u2019s purchases']), el('span', {}, [formatRs(bill.subtotal)])]),
+      el('div', { class: 'receipt-total-row' }, [el('span', {}, ['Previous due']), el('span', {}, [formatRs(bill.previous_due)])]),
       el('div', { class: 'receipt-total-row receipt-total-grand' }, [
         el('span', {}, ['Grand total']),
         el('span', {}, [formatRs(bill.total_due_after_bill)]),

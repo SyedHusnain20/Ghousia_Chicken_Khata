@@ -193,8 +193,8 @@ function buildBillHtml(bill: BillDetail): string {
     <tbody>${itemRows}</tbody>
   </table>
   <div class="totals">
-    <div class="total-row"><span>Previous due</span><span>${formatRs(bill.previous_due)}</span></div>
     <div class="total-row"><span>This bill's purchases</span><span>${formatRs(bill.subtotal)}</span></div>
+    <div class="total-row"><span>Previous due</span><span>${formatRs(bill.previous_due)}</span></div>
     <div class="total-row total-grand"><span>Grand total</span><span>${formatRs(bill.total_due_after_bill)}</span></div>
     <div class="total-row"><span>Paid now</span><span>${paymentNow > 0 ? formatRs(paymentNow) : '\u2014 (not paid yet)'}</span></div>
     <div class="total-row total-remaining"><span>Remaining due</span><span>${formatRs(bill.remaining_due)}</span></div>
