@@ -281,6 +281,7 @@ export function generateBill(
   entryIds?: number[]
 ): Bill {
   const t = tables(partyType);
+  paymentNow = floorMoney(paymentNow);
 
   const run = db.transaction(() => {
     const party = getParty(db, partyType, partyId);
@@ -306,10 +307,20 @@ export function generateBill(
     }
 
     const subtotal = floorMoney(pending.reduce((sum, e) => sum + e.line_total, 0));
-    // current_due already includes this subtotal (added per-entry in
-    // addEntry), so "before this bill's entries" is current_due minus it.
-    const previousDue = floorMoney(party.current_due - subtotal);
-    const totalDueAfterBill = party.current_due;
+    // "Previous due" is the true balance from BEFORE any currently-unbilled
+    // entries existed - current_due minus ALL of them (selected and
+    // unselected alike), not just the ones going into this bill. That way
+    // it's the same number no matter which subset gets picked, and never
+    // silently absorbs some other unbilled-but-unselected purchase into
+    // "previous due" just because it wasn't chosen for this bill.
+    const allUnbilledTotal = floorMoney(allPending.reduce((sum, e) => sum + e.line_total, 0));
+    const previousDue = floorMoney(party.current_due - allUnbilledTotal);
+    // This bill's own total is scoped to what it actually contains -
+    // previous balance plus only the entries selected for it - not the
+    // party's full current_due, which may still include other unbilled
+    // entries that aren't on this bill at all (those remain the party's
+    // problem to bill later, not something to pad this bill's total with).
+    const totalDueAfterBill = floorMoney(previousDue + subtotal);
 
     const now = pakistanNow();
     const billDate = `${now.date} ${now.time}`;
@@ -332,8 +343,12 @@ export function generateBill(
       recordPayment(db, partyType, partyId, paymentNow, billId, 'Paid at bill generation');
     }
 
-    const finalParty = getParty(db, partyType, partyId);
-    db.prepare(`UPDATE ${t.bills} SET remaining_due = ? WHERE id = ?`).run(finalParty.current_due, billId);
+    // This bill's own remaining_due - scoped to what's actually on this
+    // bill (its own total minus any payment against it) - not the
+    // party's full current_due, which may still include other unbilled
+    // entries that were left out of this bill entirely.
+    const remainingDue = floorMoney(totalDueAfterBill - paymentNow);
+    db.prepare(`UPDATE ${t.bills} SET remaining_due = ? WHERE id = ?`).run(remainingDue, billId);
 
     const items = db.prepare(`SELECT * FROM ${t.entries} WHERE bill_id = ?`).all(billId) as Entry[];
 
@@ -343,7 +358,7 @@ export function generateBill(
       previous_due: previousDue,
       subtotal,
       total_due_after_bill: totalDueAfterBill,
-      remaining_due: finalParty.current_due,
+      remaining_due: remainingDue,
       items,
     } as Bill;
   });

@@ -486,14 +486,17 @@ function generateBillPanel(
   }
 
   const subtotal = floorMoney(selected.reduce((sum, e) => sum + e.line_total, 0));
-  // currentDue already includes ALL unbilled entries (selected and
-  // unselected alike - due updates as soon as each is logged, not just at
-  // bill time). previousDue = currentDue minus only THIS bill's selected
-  // subtotal, so anything left unselected correctly flows into
-  // "previous due" here and becomes its own bill's subtotal later - no
-  // double counting either way.
-  const grandTotal = currentDue;
-  const previousDue = floorMoney(currentDue - subtotal);
+  // "Previous due" is the true balance from BEFORE any currently-unbilled
+  // entries existed - currentDue minus ALL of them (selected and
+  // unselected alike), not just the ones going into this bill. Matches
+  // generateBill's own calculation exactly, so this preview never shows a
+  // different number than what actually gets generated.
+  const allUnbilledTotal = floorMoney(entries.reduce((sum, e) => sum + e.line_total, 0));
+  const previousDue = floorMoney(currentDue - allUnbilledTotal);
+  // This bill's own total - previous balance plus only what's selected,
+  // not the party's full currentDue (which may still include other
+  // unbilled entries left out of this bill entirely).
+  const grandTotal = floorMoney(previousDue + subtotal);
 
   const paymentInput = el('input', { type: 'number', step: '0.01', min: '0', placeholder: '0 (optional)' }) as HTMLInputElement;
   const errorSlot = el('div', { class: 'form-error-slot' });
