@@ -50,16 +50,24 @@ interface AggregatedPartyRow {
 
 // The Daily Ledger shows one row per party per day, not one row per
 // transaction - if Shan bought 17kg and later 12kg the same day, this
-// merges that into a single 29kg row. The rate shown is the effective
-// rate (total Rs. / total KG), which equals the entry rate when it was
-// the same for every entry that day, and still keeps Total = KG x Rate
-// exactly true if it ever wasn't. This is purely a display grouping: the
-// underlying entries stay separate everywhere else (party profile,
-// billing), so nothing here is written back or deduplicated in the
-// database.
+// merges that into a single 29kg row. When only ONE entry contributed to
+// a row, its actual stored rate is used directly - reconstructing it via
+// total/weight would introduce a rounding artifact, since the total was
+// already floored to a whole rupee before that division (e.g. 70.1kg at
+// Rs. 288 floors to Rs. 20,188, and 20,188/70.1 floors to 287, not 288).
+// Only when multiple entries with genuinely different rates are merged
+// into one row is there no single "real" rate to show, so that case falls
+// back to the effective rate (total Rs. / total KG) - which still keeps
+// Total = KG x Rate exactly true even then. This is purely a display
+// grouping: the underlying entries stay separate everywhere else (party
+// profile, billing), so nothing here is written back or deduplicated in
+// the database.
 function aggregateByParty(rows: EntryWithPartyName[]): AggregatedPartyRow[] {
   const order: number[] = [];
-  const totals = new Map<number, { party_name: string; weight_kg: number; line_total: number }>();
+  const totals = new Map<
+    number,
+    { party_name: string; weight_kg: number; line_total: number; entryCount: number; firstRate: number }
+  >();
 
   for (const r of rows) {
     const existing = totals.get(r.party_id);
@@ -68,19 +76,32 @@ function aggregateByParty(rows: EntryWithPartyName[]): AggregatedPartyRow[] {
       // summed exactly (JS float addition here is fine at this scale).
       existing.weight_kg = existing.weight_kg + r.weight_kg;
       existing.line_total = floorMoney(existing.line_total + r.line_total);
+      existing.entryCount += 1;
     } else {
-      totals.set(r.party_id, { party_name: r.party_name, weight_kg: r.weight_kg, line_total: r.line_total });
+      totals.set(r.party_id, {
+        party_name: r.party_name,
+        weight_kg: r.weight_kg,
+        line_total: r.line_total,
+        entryCount: 1,
+        firstRate: r.rate_per_kg,
+      });
       order.push(r.party_id);
     }
   }
 
   return order.map((id) => {
     const t = totals.get(id)!;
+    const rate_per_kg =
+      t.entryCount === 1
+        ? t.firstRate // exact match to the entry's real stored rate - no reconstruction needed
+        : t.weight_kg > 0
+          ? floorMoney(t.line_total / t.weight_kg)
+          : 0;
     return {
       party_name: t.party_name,
       weight_kg: t.weight_kg,
       line_total: t.line_total,
-      rate_per_kg: t.weight_kg > 0 ? floorMoney(t.line_total / t.weight_kg) : 0,
+      rate_per_kg,
     };
   });
 }

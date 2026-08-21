@@ -239,6 +239,33 @@ export function updateEntry(
 }
 
 /**
+ * Deletes a single entry - but only while it's still unbilled, same rule
+ * as updateEntry. Once an entry is locked to a bill it's part of an
+ * immutable, possibly already-printed document and can't be removed.
+ * Reverses the entry's effect on the party's running due (the exact
+ * opposite of what addEntry did when it was logged).
+ */
+export function deleteEntry(db: Database.Database, partyType: PartyType, partyId: number, entryId: number): void {
+  const t = tables(partyType);
+
+  db.transaction(() => {
+    const existing = db
+      .prepare(`SELECT * FROM ${t.entries} WHERE id = ? AND ${t.fk} = ?`)
+      .get(entryId, partyId) as Entry | undefined;
+    if (!existing) throw new Error('Entry not found');
+    if (existing.bill_id !== null) {
+      throw new Error('This entry has already been billed and can no longer be deleted');
+    }
+
+    db.prepare(`DELETE FROM ${t.entries} WHERE id = ?`).run(entryId);
+
+    const party = getParty(db, partyType, partyId);
+    const newDue = floorMoney(party.current_due - existing.line_total);
+    db.prepare(`UPDATE ${t.party} SET current_due = ? WHERE id = ?`).run(newDue, partyId);
+  })();
+}
+
+/**
  * Bundles every unbilled entry for this party into one printable bill and
  * locks them to it. current_due already reflects these entries (it was
  * updated back in addEntry when each was logged), so this does NOT add

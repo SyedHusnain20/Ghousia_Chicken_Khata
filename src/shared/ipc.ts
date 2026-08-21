@@ -24,6 +24,7 @@ export const IpcChannels = {
   PARTY_DELETE: 'party:delete',
   ENTRY_ADD: 'entry:add',
   ENTRY_UPDATE: 'entry:update',
+  ENTRY_DELETE: 'entry:delete',
   ENTRY_LIST_UNBILLED: 'entry:list-unbilled',
   BILL_GENERATE: 'bill:generate',
   BILL_LIST_FOR_PARTY: 'bill:list-for-party',
@@ -85,6 +86,12 @@ export interface UpdateEntryRequest {
   weightKg: number;
   ratePerKg: number;
   entryDate?: string; // 'YYYY-MM-DD' - omit to leave the date unchanged
+}
+
+export interface DeleteEntryRequest {
+  partyType: PartyType;
+  partyId: number;
+  entryId: number;
 }
 
 export interface ListUnbilledEntriesRequest {
@@ -214,6 +221,7 @@ export interface KhataApi {
   deleteParty(req: DeletePartyRequest): Promise<void>;
   addEntry(req: AddEntryRequest): Promise<number>;
   updateEntry(req: UpdateEntryRequest): Promise<void>;
+  deleteEntry(req: DeleteEntryRequest): Promise<void>;
   listUnbilledEntries(req: ListUnbilledEntriesRequest): Promise<Entry[]>;
   generateBill(req: GenerateBillRequest): Promise<Bill>;
   listBillsForParty(req: ListBillsForPartyRequest): Promise<BillListItem[]>;

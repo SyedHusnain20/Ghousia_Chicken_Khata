@@ -314,6 +314,25 @@ function renderEntriesTable(
           editingId = entry.id;
           render();
         });
+
+        const deleteBtn = el('button', { class: 'btn btn-danger btn-small', type: 'button' }, ['Delete']);
+        const rowErrorSlot = el('div', { class: 'form-error-slot' });
+        deleteBtn.addEventListener('click', async () => {
+          const confirmed = window.confirm(
+            `Delete this ${entry.item_name} entry (${formatRs(entry.line_total)})? This can\u2019t be undone.`
+          );
+          if (!confirmed) return;
+          (deleteBtn as HTMLButtonElement).disabled = true;
+          rowErrorSlot.replaceChildren();
+          try {
+            await window.khata.deleteEntry({ partyType, partyId, entryId: entry.id });
+            onChanged();
+          } catch (err) {
+            rowErrorSlot.replaceChildren(errorBanner(errorMessage(err)));
+            (deleteBtn as HTMLButtonElement).disabled = false;
+          }
+        });
+
         rows.push(
           el('tr', {}, [
             el('td', {}, [formatDateTime(entry.entry_date)]),
@@ -321,7 +340,10 @@ function renderEntriesTable(
             el('td', { class: 'cell-number' }, [String(entry.weight_kg)]),
             el('td', { class: 'cell-number' }, [formatRs(entry.rate_per_kg)]),
             el('td', { class: 'cell-number cell-strong' }, [formatRs(entry.line_total)]),
-            el('td', { class: 'cell-actions' }, [editBtn]),
+            el('td', { class: 'cell-actions' }, [
+              el('div', { class: 'entry-edit-actions' }, [editBtn, deleteBtn]),
+              rowErrorSlot,
+            ]),
           ])
         );
       }
