@@ -103,6 +103,10 @@ export interface GenerateBillRequest {
   partyType: PartyType;
   partyId: number;
   paymentNow?: number;
+  // Which unbilled entries to include - omit to bill everything unbilled
+  // (the old default). When provided, only these entries get swept into
+  // the bill; the rest stay unbilled for a later one.
+  entryIds?: number[];
 }
 
 export interface RecordPaymentRequest {

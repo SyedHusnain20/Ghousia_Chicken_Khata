@@ -586,6 +586,14 @@ input:focus, select:focus, button:focus-visible, a:focus-visible, .clickable-row
   white-space: nowrap;
 }
 
+.data-table td:first-child:has(input[type="checkbox"]),
+.data-table th:first-child:has(input[type="checkbox"]) {
+  width: 36px;
+  text-align: center;
+  padding-left: 12px;
+  padding-right: 4px;
+}
+
 .entry-edit-actions {
   display: flex;
   gap: 8px;

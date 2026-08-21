@@ -95,7 +95,7 @@ export function registerIpcHandlers(db: Database.Database): void {
   });
 
   ipcMain.handle(IpcChannels.BILL_GENERATE, (_event, req: GenerateBillRequest) => {
-    return generateBill(db, req.partyType, req.partyId, req.paymentNow ?? 0);
+    return generateBill(db, req.partyType, req.partyId, req.paymentNow ?? 0, req.entryIds);
   });
 
   ipcMain.handle(IpcChannels.PAYMENT_RECORD, (_event, req: RecordPaymentRequest) => {

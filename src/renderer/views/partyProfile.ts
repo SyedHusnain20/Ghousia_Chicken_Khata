@@ -268,6 +268,7 @@ function entryEditRow(
   });
 
   return el('tr', { class: 'entry-edit-row' }, [
+    el('td', {}, [el('input', { type: 'checkbox', disabled: 'true' })]),
     el('td', {}, [dateInput]),
     el('td', {}, [itemInput]),
     el('td', {}, [kgInput]),
@@ -285,6 +286,8 @@ function renderEntriesTable(
   entries: Entry[],
   partyType: PartyType,
   partyId: number,
+  selectedIds: Set<number>,
+  onSelectionChange: () => void,
   onChanged: () => void
 ): void {
   if (entries.length === 0) {
@@ -295,6 +298,18 @@ function renderEntriesTable(
   let editingId: number | null = null;
 
   function render() {
+    const selectAllCheckbox = el('input', { type: 'checkbox' }) as HTMLInputElement;
+    selectAllCheckbox.checked = entries.length > 0 && entries.every((e) => selectedIds.has(e.id));
+    selectAllCheckbox.addEventListener('change', () => {
+      if (selectAllCheckbox.checked) {
+        entries.forEach((e) => selectedIds.add(e.id));
+      } else {
+        entries.forEach((e) => selectedIds.delete(e.id));
+      }
+      render();
+      onSelectionChange();
+    });
+
     const rows: HTMLElement[] = [];
     for (const entry of entries) {
       if (entry.id === editingId) {
@@ -333,8 +348,18 @@ function renderEntriesTable(
           }
         });
 
+        const rowCheckbox = el('input', { type: 'checkbox' }) as HTMLInputElement;
+        rowCheckbox.checked = selectedIds.has(entry.id);
+        rowCheckbox.addEventListener('change', () => {
+          if (rowCheckbox.checked) selectedIds.add(entry.id);
+          else selectedIds.delete(entry.id);
+          selectAllCheckbox.checked = entries.every((e) => selectedIds.has(e.id));
+          onSelectionChange();
+        });
+
         rows.push(
           el('tr', {}, [
+            el('td', {}, [rowCheckbox]),
             el('td', {}, [formatDateTime(entry.entry_date)]),
             el('td', {}, [entry.item_name]),
             el('td', { class: 'cell-number' }, [String(entry.weight_kg)]),
@@ -355,6 +380,7 @@ function renderEntriesTable(
       el('table', { class: 'data-table' }, [
         el('thead', {}, [
           el('tr', {}, [
+            el('th', {}, [selectAllCheckbox]),
             el('th', {}, ['Date']),
             el('th', {}, ['Item']),
             el('th', { class: 'th-right' }, ['KG']),
@@ -368,6 +394,7 @@ function renderEntriesTable(
           el('tr', {}, [
             el('td', { colspan: '5' }, ['Unbilled subtotal']),
             el('td', { class: 'cell-number cell-strong' }, [formatRs(total)]),
+            el('td', {}, []),
           ]),
         ]),
       ])
@@ -434,11 +461,14 @@ function billsTable(bills: BillListItem[], partyType: PartyType): HTMLElement {
 // The Generate Bill panel: shows a preview of what the bill will contain
 // (built entirely from data already on the page - no extra fetch needed),
 // an optional payment-now field, and generates + navigates straight to the
-// printable bill on success.
+// printable bill on success. Only the entries currently checked in the
+// table above (selectedIds) go into the bill - anything left unchecked
+// stays unbilled for a later one.
 function generateBillPanel(
   partyType: PartyType,
   partyId: number,
   entries: Entry[],
+  selectedIds: Set<number>,
   currentDue: number
 ): HTMLElement {
   if (entries.length === 0) {
@@ -447,11 +477,21 @@ function generateBillPanel(
     ]);
   }
 
-  const subtotal = entries.reduce((sum, e) => sum + e.line_total, 0);
-  // currentDue already includes these unbilled entries (due updates as
-  // soon as each is logged now, not just at bill time), so the grand
-  // total the bill will show is simply the current due - not
-  // currentDue + subtotal, which would double-count them.
+  const selected = entries.filter((e) => selectedIds.has(e.id));
+
+  if (selected.length === 0) {
+    return el('p', { class: 'field-hint' }, [
+      'No entries are selected. Check the ones you want to include above (or use the header checkbox to select all), then come back here to generate the bill.',
+    ]);
+  }
+
+  const subtotal = floorMoney(selected.reduce((sum, e) => sum + e.line_total, 0));
+  // currentDue already includes ALL unbilled entries (selected and
+  // unselected alike - due updates as soon as each is logged, not just at
+  // bill time). previousDue = currentDue minus only THIS bill's selected
+  // subtotal, so anything left unselected correctly flows into
+  // "previous due" here and becomes its own bill's subtotal later - no
+  // double counting either way.
   const grandTotal = currentDue;
   const previousDue = floorMoney(currentDue - subtotal);
 
@@ -461,7 +501,11 @@ function generateBillPanel(
   const form = el('form', { class: 'inline-form' }, [
     el('div', { class: 'bill-preview' }, [
       el('div', { class: 'bill-preview-row' }, [
-        el('span', {}, [`${entries.length} unbilled entr${entries.length === 1 ? 'y' : 'ies'}`]),
+        el('span', {}, [
+          `${selected.length} selected entr${selected.length === 1 ? 'y' : 'ies'}${
+            selected.length < entries.length ? ` (of ${entries.length} unbilled)` : ''
+          }`,
+        ]),
         el('span', {}, [formatRs(subtotal)]),
       ]),
       el('div', { class: 'bill-preview-row' }, [el('span', {}, ['Previous due']), el('span', {}, [formatRs(previousDue)])]),
@@ -495,7 +539,12 @@ function generateBillPanel(
     const submitBtn = form.querySelector('button[type="submit"]') as HTMLButtonElement;
     submitBtn.disabled = true;
     try {
-      const bill = await window.khata.generateBill({ partyType, partyId, paymentNow });
+      const bill = await window.khata.generateBill({
+        partyType,
+        partyId,
+        paymentNow,
+        entryIds: selected.map((e) => e.id),
+      });
       navigate(`/bills/${partyType}/${bill.id}`);
     } catch (err) {
       errorSlot.replaceChildren(errorBanner(errorMessage(err)));
@@ -539,12 +588,22 @@ export async function renderPartyProfile(
   const paymentFormWrap = el('div', {});
   const deleteWrap = el('div', {});
 
+  // Which unbilled entries are checked for the next bill. Defaults to
+  // "everything" whenever entries are (re)fetched - matches the old
+  // behavior (bill everything) unless the shopkeeper deliberately
+  // unchecks specific ones for a partial bill.
+  let selectedEntryIds = new Set<number>(entries.map((e) => e.id));
+
+  function renderBillPanel() {
+    mount(generateBillWrap, generateBillPanel(partyType, partyId, entries, selectedEntryIds, party.current_due));
+  }
+
   function refreshStatic() {
     mount(heroWrap, dueHero(party, partyType));
-    renderEntriesTable(entriesWrap, entries, partyType, partyId, reload);
+    renderEntriesTable(entriesWrap, entries, partyType, partyId, selectedEntryIds, renderBillPanel, reload);
     mount(paymentsWrap, paymentsTable(payments));
     mount(billsWrap, billsTable(bills, partyType));
-    mount(generateBillWrap, generateBillPanel(partyType, partyId, entries, party.current_due));
+    renderBillPanel();
     mount(deleteWrap, deletePartyControls(party, partyType));
   }
 
@@ -555,6 +614,7 @@ export async function renderPartyProfile(
       window.khata.listPayments({ partyType, partyId }),
       window.khata.listBillsForParty({ partyType, partyId }),
     ]);
+    selectedEntryIds = new Set(entries.map((e) => e.id));
     refreshStatic();
     // Forms read party.current_due / entries at build time, so they're
     // rebuilt fresh on every reload rather than mutated in place.

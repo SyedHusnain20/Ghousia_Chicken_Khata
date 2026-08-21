@@ -277,16 +277,32 @@ export function generateBill(
   db: Database.Database,
   partyType: PartyType,
   partyId: number,
-  paymentNow: number = 0
+  paymentNow: number = 0,
+  entryIds?: number[]
 ): Bill {
   const t = tables(partyType);
 
   const run = db.transaction(() => {
     const party = getParty(db, partyType, partyId);
-    const pending = getUnbilledEntries(db, partyType, partyId);
+    const allPending = getUnbilledEntries(db, partyType, partyId);
+
+    let pending: Entry[];
+    if (entryIds) {
+      const selectedSet = new Set(entryIds);
+      pending = allPending.filter((e) => selectedSet.has(e.id));
+      if (pending.length !== entryIds.length) {
+        throw new Error(
+          'One or more selected entries are no longer available to bill (already billed, edited, or deleted) - please refresh and try again'
+        );
+      }
+    } else {
+      // No selection provided - bill everything unbilled, same as before
+      // per-entry selection existed.
+      pending = allPending;
+    }
 
     if (pending.length === 0) {
-      throw new Error('No unbilled entries to generate a bill from');
+      throw new Error('No unbilled entries selected to generate a bill from');
     }
 
     const subtotal = floorMoney(pending.reduce((sum, e) => sum + e.line_total, 0));
