@@ -9,6 +9,7 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { path: '/', label: 'Dashboard', icon: '⌂' },
   { path: '/suppliers', label: 'Suppliers', icon: '🚚' },
+  { path: '/shopkeepers', label: 'Shopkeepers', icon: '🏪' },
   { path: '/customers', label: 'Customers / Khata', icon: '👥' },
   { path: '/ledger', label: 'Daily Ledger', icon: '📒' },
   { path: '/bills', label: 'Bills', icon: '🧾' },

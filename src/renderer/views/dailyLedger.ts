@@ -63,14 +63,18 @@ interface AggregatedPartyRow {
 // profile, billing), so nothing here is written back or deduplicated in
 // the database.
 function aggregateByParty(rows: EntryWithPartyName[]): AggregatedPartyRow[] {
-  const order: number[] = [];
+  const order: string[] = [];
   const totals = new Map<
-    number,
+    string,
     { party_name: string; weight_kg: number; line_total: number; entryCount: number; firstRate: number }
   >();
 
   for (const r of rows) {
-    const existing = totals.get(r.party_id);
+    // party_id alone isn't unique across party types - Supplier Purchases
+    // can now include both suppliers and shopkeepers, which are different
+    // tables with independently-numbered IDs.
+    const key = `${r.party_type}:${r.party_id}`;
+    const existing = totals.get(key);
     if (existing) {
       // weight_kg is a physical quantity, not money - never floored, only
       // summed exactly (JS float addition here is fine at this scale).
@@ -78,19 +82,19 @@ function aggregateByParty(rows: EntryWithPartyName[]): AggregatedPartyRow[] {
       existing.line_total = floorMoney(existing.line_total + r.line_total);
       existing.entryCount += 1;
     } else {
-      totals.set(r.party_id, {
+      totals.set(key, {
         party_name: r.party_name,
         weight_kg: r.weight_kg,
         line_total: r.line_total,
         entryCount: 1,
         firstRate: r.rate_per_kg,
       });
-      order.push(r.party_id);
+      order.push(key);
     }
   }
 
-  return order.map((id) => {
-    const t = totals.get(id)!;
+  return order.map((key) => {
+    const t = totals.get(key)!;
     const rate_per_kg =
       t.entryCount === 1
         ? t.firstRate // exact match to the entry's real stored rate - no reconstruction needed
@@ -273,7 +277,7 @@ function createLedgerPrompt(ledgerDate: string, onCreated: () => void): HTMLElem
   return el('section', { class: 'panel' }, [
     el('h2', {}, ['No ledger yet for this date']),
     el('p', { class: 'field-hint' }, [
-      'Starting it just opens the day for Extra Expenses and Cash Customers entry. Any supplier purchases or ' +
+      'Starting it just opens the day for Extra Expenses and Cash Customers entry. Any supplier/shopkeeper purchases or ' +
         'Khata sales already on file for this date will be pulled in automatically \u2014 nothing is duplicated.',
     ]),
     errorSlot,
@@ -313,9 +317,9 @@ export async function renderDailyLedger(ledgerDate: string, container: HTMLEleme
           el('h2', {}, ['Expenses']),
           partyEntriesTable(
             detail.supplier_purchases,
-            'Supplier',
+            'Supplier / Shopkeeper',
             'Supplier Purchases Total',
-            'No supplier purchases recorded for this date.'
+            'No supplier or shopkeeper purchases recorded for this date.'
           ),
           totalLine('Extra Expenses', detail.extra_expenses),
           el('hr', { class: 'ledger-total-rule' }),

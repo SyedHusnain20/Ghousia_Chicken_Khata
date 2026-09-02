@@ -39,7 +39,10 @@ function escapeHtml(value: string): string {
 const TITLE: Record<PartyType, string> = {
   supplier: 'Supplier Bill',
   customer: 'Customer Bill',
+  shopkeeper: 'Shopkeeper Bill',
 };
+
+const PARTY_LABEL: Record<PartyType, string> = { supplier: 'Supplier', customer: 'Customer', shopkeeper: 'Shopkeeper' };
 
 // Deliberately mirrors src/renderer/style.css's .receipt* rules and color
 // tokens as closely as possible, so the shared image looks like the same
@@ -183,7 +186,7 @@ function buildBillHtml(bill: BillDetail): string {
   <div class="meta">
     <div class="meta-row"><span>Bill #</span><span>${bill.id}</span></div>
     <div class="meta-row"><span>Date</span><span>${formatDateTime(bill.bill_date)}</span></div>
-    <div class="meta-row"><span>${bill.party_type === 'supplier' ? 'Supplier' : 'Customer'}</span><span>${escapeHtml(bill.party_name)}</span></div>
+    <div class="meta-row"><span>${PARTY_LABEL[bill.party_type]}</span><span>${escapeHtml(bill.party_name)}</span></div>
     ${bill.party_contact ? `<div class="meta-row"><span>Contact</span><span>${escapeHtml(bill.party_contact)}</span></div>` : ''}
   </div>
   <table>

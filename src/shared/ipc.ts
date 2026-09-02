@@ -7,6 +7,7 @@ import {
   BillListItem,
   BillDetail,
   Payment,
+  PaymentMethod,
   DailyLedger,
   DailyLedgerDetail,
   DailyLedgerSummary,
@@ -115,6 +116,8 @@ export interface RecordPaymentRequest {
   amount: number;
   billId?: number | null;
   note?: string | null;
+  paymentMethod?: PaymentMethod | null;
+  paymentDate?: string; // 'YYYY-MM-DD' - omit to use today
 }
 
 export interface ListPaymentsRequest {

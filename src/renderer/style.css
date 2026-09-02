@@ -885,6 +885,11 @@ input:focus, select:focus, button:focus-visible, a:focus-visible, .clickable-row
   color: var(--color-due);
 }
 
+.type-badge-shopkeeper {
+  background: var(--color-primary-tint);
+  color: var(--color-primary);
+}
+
 .type-badge-customer {
   background: var(--color-credit-tint);
   color: var(--color-credit);

@@ -21,6 +21,18 @@ CREATE TABLE IF NOT EXISTS customers (
   created_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Shopkeepers behave exactly like suppliers (purchases, payments, bills) -
+-- kept as their own separate tables (rather than folding into suppliers)
+-- so their accounts and history never mix with actual chicken suppliers'.
+CREATE TABLE IF NOT EXISTS shopkeepers (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  name          TEXT NOT NULL,
+  contact_number TEXT,
+  opening_due   REAL NOT NULL DEFAULT 0,
+  current_due   REAL NOT NULL DEFAULT 0,
+  created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS supplier_bills (
   id                   INTEGER PRIMARY KEY AUTOINCREMENT,
   supplier_id          INTEGER NOT NULL REFERENCES suppliers(id),
@@ -34,6 +46,16 @@ CREATE TABLE IF NOT EXISTS supplier_bills (
 CREATE TABLE IF NOT EXISTS customer_bills (
   id                   INTEGER PRIMARY KEY AUTOINCREMENT,
   customer_id          INTEGER NOT NULL REFERENCES customers(id),
+  bill_date            TEXT NOT NULL DEFAULT (datetime('now')),
+  previous_due         REAL NOT NULL,
+  subtotal             REAL NOT NULL,
+  total_due_after_bill REAL NOT NULL,
+  remaining_due        REAL NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS shopkeeper_bills (
+  id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+  shopkeeper_id        INTEGER NOT NULL REFERENCES shopkeepers(id),
   bill_date            TEXT NOT NULL DEFAULT (datetime('now')),
   previous_due         REAL NOT NULL,
   subtotal             REAL NOT NULL,
@@ -65,21 +87,39 @@ CREATE TABLE IF NOT EXISTS customer_entries (
   bill_id      INTEGER REFERENCES customer_bills(id)
 );
 
--- Every payment, from either entry point (bill-time or standalone profile field).
+CREATE TABLE IF NOT EXISTS shopkeeper_entries (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  shopkeeper_id INTEGER NOT NULL REFERENCES shopkeepers(id),
+  entry_date    TEXT NOT NULL DEFAULT (datetime('now')),
+  item_name     TEXT NOT NULL DEFAULT 'Chicken',
+  weight_kg     REAL NOT NULL,
+  rate_per_kg   REAL NOT NULL,
+  line_total    REAL NOT NULL,
+  bill_id       INTEGER REFERENCES shopkeeper_bills(id)
+);
+
+-- Every payment, from either entry point (bill-time or standalone profile
+-- field). No CHECK constraint on party_type - the app's PartyType union
+-- already enforces valid values at the TypeScript level, and a DB-level
+-- allowed-list here would need a schema migration every time a new party
+-- type is added (as happened when 'shopkeeper' was introduced).
 CREATE TABLE IF NOT EXISTS payments (
-  id         INTEGER PRIMARY KEY AUTOINCREMENT,
-  party_type TEXT NOT NULL CHECK (party_type IN ('supplier', 'customer')),
-  party_id   INTEGER NOT NULL,
-  bill_id    INTEGER,             -- NULL if this was a standalone payment
-  amount     REAL NOT NULL,
-  paid_at    TEXT NOT NULL DEFAULT (datetime('now')),
-  note       TEXT
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  party_type     TEXT NOT NULL,
+  party_id       INTEGER NOT NULL,
+  bill_id        INTEGER,             -- NULL if this was a standalone payment
+  amount         REAL NOT NULL,
+  payment_method TEXT,                -- 'online' | 'cash' - nullable so old payments (recorded before this field existed) just show blank, not a fake default
+  paid_at        TEXT NOT NULL DEFAULT (datetime('now')),
+  note           TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_supplier_entries_unbilled
   ON supplier_entries (supplier_id) WHERE bill_id IS NULL;
 CREATE INDEX IF NOT EXISTS idx_customer_entries_unbilled
   ON customer_entries (customer_id) WHERE bill_id IS NULL;
+CREATE INDEX IF NOT EXISTS idx_shopkeeper_entries_unbilled
+  ON shopkeeper_entries (shopkeeper_id) WHERE bill_id IS NULL;
 
 -- Daily Ledger: one row per business date, created explicitly by the
 -- shopkeeper (UNIQUE constraint makes accidental duplicates for the same
@@ -101,3 +141,4 @@ CREATE TABLE IF NOT EXISTS daily_ledgers (
 -- efficiently once the entries table has months of history in it.
 CREATE INDEX IF NOT EXISTS idx_supplier_entries_date ON supplier_entries (entry_date);
 CREATE INDEX IF NOT EXISTS idx_customer_entries_date ON customer_entries (entry_date);
+CREATE INDEX IF NOT EXISTS idx_shopkeeper_entries_date ON shopkeeper_entries (entry_date);

@@ -10,6 +10,7 @@ function filterTabs(active: FilterValue, onChange: (value: FilterValue) => void)
   const options: { value: FilterValue; label: string }[] = [
     { value: 'all', label: 'All' },
     { value: 'supplier', label: 'Suppliers' },
+    { value: 'shopkeeper', label: 'Shopkeepers' },
     { value: 'customer', label: 'Customers' },
   ];
   return el(
@@ -29,13 +30,12 @@ function billsTable(bills: BillListItem[]): HTMLElement {
   if (bills.length === 0) {
     return emptyState('No bills generated yet.');
   }
+  const partyLabel: Record<PartyType, string> = { supplier: 'Supplier', customer: 'Customer', shopkeeper: 'Shopkeeper' };
   const rows = bills.map((bill) => {
     const row = el('tr', { class: 'clickable-row', tabindex: '0' }, [
       el('td', {}, [formatDateTime(bill.bill_date)]),
       el('td', {}, [
-        el('span', { class: `type-badge type-badge-${bill.party_type}` }, [
-          bill.party_type === 'supplier' ? 'Supplier' : 'Customer',
-        ]),
+        el('span', { class: `type-badge type-badge-${bill.party_type}` }, [partyLabel[bill.party_type]]),
       ]),
       el('td', { class: 'cell-name' }, [bill.party_name]),
       el('td', { class: 'cell-number' }, [formatRs(bill.subtotal)]),

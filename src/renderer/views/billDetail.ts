@@ -7,7 +7,9 @@ import type { BillDetail, PartyType } from '../../main/types';
 const TITLE: Record<PartyType, string> = {
   supplier: 'Supplier Bill',
   customer: 'Customer Bill',
+  shopkeeper: 'Shopkeeper Bill',
 };
+const PARTY_LABEL: Record<PartyType, string> = { supplier: 'Supplier', customer: 'Customer', shopkeeper: 'Shopkeeper' };
 
 function receiptMarkup(bill: BillDetail): HTMLElement {
   const paymentNow = Math.floor(bill.total_due_after_bill - bill.remaining_due);
@@ -31,7 +33,7 @@ function receiptMarkup(bill: BillDetail): HTMLElement {
     el('div', { class: 'receipt-meta' }, [
       el('div', {}, [el('span', {}, ['Bill #']), el('span', {}, [String(bill.id)])]),
       el('div', {}, [el('span', {}, ['Date']), el('span', {}, [formatDateTime(bill.bill_date)])]),
-      el('div', {}, [el('span', {}, [bill.party_type === 'supplier' ? 'Supplier' : 'Customer']), el('span', {}, [bill.party_name])]),
+      el('div', {}, [el('span', {}, [PARTY_LABEL[bill.party_type]]), el('span', {}, [bill.party_name])]),
       bill.party_contact
         ? el('div', {}, [el('span', {}, ['Contact']), el('span', {}, [bill.party_contact])])
         : null,

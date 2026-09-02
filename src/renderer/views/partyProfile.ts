@@ -24,6 +24,13 @@ const COPY: Record<
     listPath: '/suppliers',
     addEntryLabel: 'Purchases (unbilled)',
   },
+  shopkeeper: {
+    title: 'Shopkeeper',
+    entryVerb: 'Add Purchase',
+    entryNoun: 'purchase',
+    listPath: '/shopkeepers',
+    addEntryLabel: 'Purchases (unbilled)',
+  },
   customer: {
     title: 'Customer',
     entryVerb: 'Add Sale',
@@ -68,7 +75,7 @@ function deletePartyControls(party: Party, partyType: PartyType): HTMLElement {
 
 function dueHero(party: Party, partyType: PartyType): HTMLElement {
   const due = formatDue(party.current_due);
-  const label = partyType === 'supplier' ? 'You owe' : 'Owes you';
+  const label = partyType === 'customer' ? 'Owes you' : 'You owe';
   return el('div', { class: `due-hero due-hero-${due.kind}` }, [
     el('div', { class: 'due-hero-info' }, [
       el('h1', {}, [party.name]),
@@ -158,6 +165,11 @@ function addEntryForm(partyType: PartyType, partyId: number, onSaved: () => void
 }
 
 function paymentForm(partyType: PartyType, partyId: number, currentDue: number, onSaved: () => void): HTMLElement {
+  const methodSelect = el('select', {}, [
+    el('option', { value: 'cash' }, ['Cash']),
+    el('option', { value: 'online' }, ['Online']),
+  ]) as HTMLSelectElement;
+  const dateInput = el('input', { type: 'date', value: todayIso() }) as HTMLInputElement;
   const amountInput = el('input', { type: 'number', step: '0.01', min: '0.01', placeholder: '0' }) as HTMLInputElement;
   const errorSlot = el('div', { class: 'form-error-slot' });
 
@@ -168,7 +180,11 @@ function paymentForm(partyType: PartyType, partyId: number, currentDue: number, 
   ]);
 
   const form = el('form', { class: 'inline-form' }, [
-    el('div', { class: 'form-grid form-grid-tight' }, [el('label', {}, ['Amount (Rs.)', amountInput])]),
+    el('div', { class: 'form-grid form-grid-tight' }, [
+      el('label', {}, ['Method', methodSelect]),
+      el('label', {}, ['Date', dateInput]),
+      el('label', {}, ['Amount (Rs.)', amountInput]),
+    ]),
     hint,
     errorSlot,
     el('div', { class: 'form-actions' }, [el('button', { class: 'btn btn-primary', type: 'submit' }, ['Record Payment'])]),
@@ -183,11 +199,22 @@ function paymentForm(partyType: PartyType, partyId: number, currentDue: number, 
       errorSlot.append(errorBanner('Payment amount must be a positive number.'));
       return;
     }
+    if (!dateInput.value) {
+      errorSlot.append(errorBanner('Date is required.'));
+      return;
+    }
 
     const submitBtn = form.querySelector('button[type="submit"]') as HTMLButtonElement;
     submitBtn.disabled = true;
     try {
-      await window.khata.recordPayment({ partyType, partyId, amount, note: 'Standalone payment' });
+      await window.khata.recordPayment({
+        partyType,
+        partyId,
+        amount,
+        note: 'Standalone payment',
+        paymentMethod: methodSelect.value as 'online' | 'cash',
+        paymentDate: dateInput.value,
+      });
       amountInput.value = '';
       onSaved();
     } catch (err) {
@@ -408,9 +435,11 @@ function paymentsTable(payments: Payment[]): HTMLElement {
   if (payments.length === 0) {
     return emptyState('No payments recorded yet.');
   }
+  const methodLabel: Record<string, string> = { cash: 'Cash', online: 'Online' };
   const rows = payments.map((p) =>
     el('tr', {}, [
       el('td', {}, [formatDateTime(p.paid_at)]),
+      el('td', { class: 'cell-muted' }, [p.payment_method ? methodLabel[p.payment_method] : '\u2014']),
       el('td', { class: 'cell-number cell-strong' }, [formatRs(p.amount)]),
       el('td', { class: 'cell-muted' }, [p.bill_id ? `Bill #${p.bill_id}` : p.note || 'Standalone']),
     ])
@@ -419,6 +448,7 @@ function paymentsTable(payments: Payment[]): HTMLElement {
     el('thead', {}, [
       el('tr', {}, [
         el('th', {}, ['Date']),
+        el('th', {}, ['Method']),
         el('th', { class: 'th-right' }, ['Amount']),
         el('th', {}, ['Source']),
       ]),

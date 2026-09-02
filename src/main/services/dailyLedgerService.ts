@@ -33,21 +33,30 @@ export function createDailyLedger(db: Database.Database, ledgerDate: string): Da
 }
 
 /**
- * Supplier purchases for one date, with the supplier's name attached.
+ * Supplier AND shopkeeper purchases for one date, with the party's name
+ * attached - shopkeepers behave exactly like suppliers (spec: money the
+ * shop owes for purchases), so their purchases are an expense here just
+ * the same and must be included, or Total Expenses would silently
+ * understate whenever a shopkeeper purchase happened that day.
  * Rule 1/2 (spec section 31): a purchase is the expense; a payment
- * against the supplier's due is NOT included here at all - payments live
- * only in the `payments` table and never touch entry_date-based queries.
+ * against the due is NOT included here at all - payments live only in
+ * the `payments` table and never touch entry_date-based queries.
  */
 function getSupplierPurchasesForDate(db: Database.Database, date: string): EntryWithPartyName[] {
   return db
     .prepare(
-      `SELECT se.*, se.supplier_id AS party_id, s.name AS party_name
+      `SELECT se.*, 'supplier' AS party_type, se.supplier_id AS party_id, s.name AS party_name
        FROM supplier_entries se
        JOIN suppliers s ON s.id = se.supplier_id
        WHERE date(se.entry_date) = ?
-       ORDER BY se.entry_date`
+       UNION ALL
+       SELECT ke.*, 'shopkeeper' AS party_type, ke.shopkeeper_id AS party_id, k.name AS party_name
+       FROM shopkeeper_entries ke
+       JOIN shopkeepers k ON k.id = ke.shopkeeper_id
+       WHERE date(ke.entry_date) = ?
+       ORDER BY entry_date`
     )
-    .all(date) as EntryWithPartyName[];
+    .all(date, date) as EntryWithPartyName[];
 }
 
 /**
@@ -60,7 +69,7 @@ function getSupplierPurchasesForDate(db: Database.Database, date: string): Entry
 function getKhataSalesForDate(db: Database.Database, date: string): EntryWithPartyName[] {
   return db
     .prepare(
-      `SELECT ce.*, ce.customer_id AS party_id, c.name AS party_name
+      `SELECT ce.*, 'customer' AS party_type, ce.customer_id AS party_id, c.name AS party_name
        FROM customer_entries ce
        JOIN customers c ON c.id = ce.customer_id
        WHERE date(ce.entry_date) = ?
@@ -178,8 +187,13 @@ export function listDailyLedgers(
     const supplierTotal = floorMoney(
       (
         db
-          .prepare(`SELECT COALESCE(SUM(line_total), 0) AS total FROM supplier_entries WHERE date(entry_date) = ?`)
-          .get(ledger.ledger_date) as { total: number }
+          .prepare(
+            `SELECT
+               COALESCE((SELECT SUM(line_total) FROM supplier_entries WHERE date(entry_date) = ?), 0) +
+               COALESCE((SELECT SUM(line_total) FROM shopkeeper_entries WHERE date(entry_date) = ?), 0)
+             AS total`
+          )
+          .get(ledger.ledger_date, ledger.ledger_date) as { total: number }
       ).total
     );
     const khataTotal = floorMoney(

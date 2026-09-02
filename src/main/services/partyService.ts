@@ -1,13 +1,24 @@
 import Database from 'better-sqlite3';
-import { PartyType, Party, PartyWithActivity, Entry, Bill, BillListItem, BillDetail, Payment } from '../types';
+import { PartyType, Party, PartyWithActivity, Entry, Bill, BillListItem, BillDetail, Payment, PaymentMethod } from '../types';
 
 // Table names differ by party type but the logic is identical, so we
 // resolve table names once per call rather than duplicating every function.
 function tables(partyType: PartyType) {
-  if (partyType === 'supplier') {
-    return { party: 'suppliers', entries: 'supplier_entries', bills: 'supplier_bills', fk: 'supplier_id' };
+  switch (partyType) {
+    case 'supplier':
+      return { party: 'suppliers', entries: 'supplier_entries', bills: 'supplier_bills', fk: 'supplier_id' };
+    case 'customer':
+      return { party: 'customers', entries: 'customer_entries', bills: 'customer_bills', fk: 'customer_id' };
+    case 'shopkeeper':
+      return { party: 'shopkeepers', entries: 'shopkeeper_entries', bills: 'shopkeeper_bills', fk: 'shopkeeper_id' };
+    default: {
+      // Exhaustiveness check: if PartyType ever gains a new member without
+      // a case here, this line fails to compile instead of silently
+      // routing the new type into the wrong tables at runtime.
+      const _exhaustive: never = partyType;
+      throw new Error(`Unknown party type: ${_exhaustive}`);
+    }
   }
-  return { party: 'customers', entries: 'customer_entries', bills: 'customer_bills', fk: 'customer_id' };
 }
 
 export function createParty(
@@ -377,26 +388,31 @@ export function recordPayment(
   partyId: number,
   amount: number,
   billId: number | null = null,
-  note: string | null = null
+  note: string | null = null,
+  paymentMethod: PaymentMethod | null = null,
+  paymentDate?: string
 ): Payment {
   if (amount <= 0) throw new Error('Payment amount must be positive');
+  if (paymentDate !== undefined && !DATE_ONLY_RE.test(paymentDate)) {
+    throw new Error("paymentDate must be in 'YYYY-MM-DD' format");
+  }
+  amount = floorMoney(amount);
   const t = tables(partyType);
 
   const run = db.transaction(() => {
     const now = pakistanNow();
-    const paidAt = `${now.date} ${now.time}`;
+    // Same backdating convention as addEntry: the calendar date is
+    // whatever was chosen, but the time-of-day is always the real current
+    // time - never a placeholder, even for a backdated payment.
+    const paidAt = `${paymentDate ?? now.date} ${now.time}`;
     const insertPayment = db.prepare(
-      `INSERT INTO payments (party_type, party_id, bill_id, amount, note, paid_at) VALUES (?, ?, ?, ?, ?, ?)`
+      `INSERT INTO payments (party_type, party_id, bill_id, amount, payment_method, note, paid_at) VALUES (?, ?, ?, ?, ?, ?, ?)`
     );
-    const result = insertPayment.run(partyType, partyId, billId, amount, note, paidAt);
+    const result = insertPayment.run(partyType, partyId, billId, amount, paymentMethod, note, paidAt);
 
     const party = getParty(db, partyType, partyId);
     const newDue = floorMoney(party.current_due - amount);
     db.prepare(`UPDATE ${t.party} SET current_due = ? WHERE id = ?`).run(newDue, partyId);
-
-    if (billId !== null) {
-      db.prepare(`UPDATE ${t.bills} SET remaining_due = ? WHERE id = ?`).run(newDue, billId);
-    }
 
     return db.prepare('SELECT * FROM payments WHERE id = ?').get(result.lastInsertRowid) as Payment;
   });

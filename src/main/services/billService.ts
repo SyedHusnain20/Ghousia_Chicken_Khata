@@ -41,6 +41,12 @@ export function listAllBills(db: Database.Database, filter: ListAllBillsFilter =
     FROM customer_bills cb
     JOIN customers c ON c.id = cb.customer_id
   `;
+  const shopkeeperSql = `
+    SELECT kb.id, 'shopkeeper' AS party_type, kb.shopkeeper_id AS party_id, k.name AS party_name,
+           kb.bill_date, kb.previous_due, kb.subtotal, kb.total_due_after_bill, kb.remaining_due
+    FROM shopkeeper_bills kb
+    JOIN shopkeepers k ON k.id = kb.shopkeeper_id
+  `;
 
   let sql: string;
   let allParams: string[];
@@ -51,17 +57,22 @@ export function listAllBills(db: Database.Database, filter: ListAllBillsFilter =
   } else if (filter.partyType === 'customer') {
     sql = `${customerSql} ${whereSql} ORDER BY cb.bill_date DESC, cb.id DESC`;
     allParams = params;
+  } else if (filter.partyType === 'shopkeeper') {
+    sql = `${shopkeeperSql} ${whereSql} ORDER BY kb.bill_date DESC, kb.id DESC`;
+    allParams = params;
   } else {
     sql = `
       SELECT * FROM (
         ${supplierSql}
         UNION ALL
         ${customerSql}
+        UNION ALL
+        ${shopkeeperSql}
       )
       ${whereSql}
       ORDER BY bill_date DESC, id DESC
     `;
-    allParams = [...params, ...params];
+    allParams = [...params, ...params, ...params];
   }
 
   return db.prepare(sql).all(...allParams) as BillListItem[];

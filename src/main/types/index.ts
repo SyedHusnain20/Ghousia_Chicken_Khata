@@ -1,4 +1,6 @@
-export type PartyType = 'supplier' | 'customer';
+export type PartyType = 'supplier' | 'customer' | 'shopkeeper';
+
+export type PaymentMethod = 'online' | 'cash';
 
 export interface Party {
   id: number;
@@ -68,6 +70,7 @@ export interface Payment {
   party_id: number;
   bill_id: number | null;
   amount: number;
+  payment_method: PaymentMethod | null; // null for payments recorded before this field existed
   paid_at: string;
   note: string | null;
 }
@@ -76,6 +79,7 @@ export interface Payment {
 // items, where "Ali - 70kg x 380" needs to be shown without a separate
 // lookup per row.
 export interface EntryWithPartyName extends Entry {
+  party_type: PartyType;
   party_id: number;
   party_name: string;
 }

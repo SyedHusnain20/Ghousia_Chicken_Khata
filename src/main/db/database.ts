@@ -31,5 +31,52 @@ export function openDatabase(filePath: string): Database.Database {
   const schema = fs.readFileSync(schemaPath, 'utf-8');
   db.exec(schema);
 
+  runMigrations(db);
+
   return db;
+}
+
+/**
+ * Evolves a database that already existed before this version of the app -
+ * CREATE TABLE IF NOT EXISTS (in schema.sql, run above) only creates
+ * tables that don't exist yet; it can't add a column to or change a CHECK
+ * constraint on a table a client's live database already has. Every step
+ * here checks the database's actual current state first, so running this
+ * on every startup (including on a brand-new database that already has
+ * the latest shape from schema.sql) is always a safe no-op.
+ */
+function runMigrations(db: Database.Database): void {
+  const paymentColumns = db.prepare('PRAGMA table_info(payments)').all() as { name: string }[];
+  if (!paymentColumns.some((c) => c.name === 'payment_method')) {
+    db.exec('ALTER TABLE payments ADD COLUMN payment_method TEXT');
+  }
+
+  // SQLite has no ALTER TABLE for dropping/loosening a CHECK constraint -
+  // the only way to remove the old ('supplier','customer')-only constraint
+  // (so 'shopkeeper' payments are accepted) is to rebuild the table. Only
+  // runs once per database: after the first run, the constraint is gone
+  // and this check is skipped on every future startup.
+  const tableDef = db
+    .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'payments'")
+    .get() as { sql: string } | undefined;
+  if (tableDef && tableDef.sql.includes('CHECK')) {
+    db.exec(`
+      BEGIN TRANSACTION;
+      CREATE TABLE payments_new (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        party_type     TEXT NOT NULL,
+        party_id       INTEGER NOT NULL,
+        bill_id        INTEGER,
+        amount         REAL NOT NULL,
+        payment_method TEXT,
+        paid_at        TEXT NOT NULL DEFAULT (datetime('now')),
+        note           TEXT
+      );
+      INSERT INTO payments_new (id, party_type, party_id, bill_id, amount, payment_method, paid_at, note)
+        SELECT id, party_type, party_id, bill_id, amount, payment_method, paid_at, note FROM payments;
+      DROP TABLE payments;
+      ALTER TABLE payments_new RENAME TO payments;
+      COMMIT;
+    `);
+  }
 }

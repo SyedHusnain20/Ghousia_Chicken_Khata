@@ -48,6 +48,19 @@ route('/customers/:id', (params, el) => {
   renderPartyProfile('customer', id, el);
 });
 
+route('/shopkeepers', (_params, el) => {
+  renderPartyList('shopkeeper', el);
+});
+
+route('/shopkeepers/:id', (params, el) => {
+  const id = Number(params.id);
+  if (!Number.isInteger(id)) {
+    renderPlaceholder(el, 'Shopkeeper not found', 'That shopkeeper link doesn\u2019t look right.');
+    return;
+  }
+  renderPartyProfile('shopkeeper', id, el);
+});
+
 route('/ledger', (_params, el) => {
   renderDailyLedger(todayIso(), el);
 });
@@ -67,11 +80,12 @@ route('/bills', (_params, el) => {
 route('/bills/:partyType/:id', (params, el) => {
   const id = Number(params.id);
   const partyType = params.partyType;
-  if (!Number.isInteger(id) || (partyType !== 'supplier' && partyType !== 'customer')) {
+  const validTypes = ['supplier', 'customer', 'shopkeeper'];
+  if (!Number.isInteger(id) || !validTypes.includes(partyType)) {
     renderPlaceholder(el, 'Bill not found', 'That bill link doesn\u2019t look right.');
     return;
   }
-  renderBillDetail(partyType, id, el);
+  renderBillDetail(partyType as 'supplier' | 'customer' | 'shopkeeper', id, el);
 });
 
 route('/settings', (_params, el) => {

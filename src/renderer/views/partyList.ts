@@ -12,6 +12,13 @@ const COPY: Record<PartyType, { title: string; singular: string; addLabel: strin
     dueLabel: 'You owe',
     contactHint: 'e.g. 0300-1234567',
   },
+  shopkeeper: {
+    title: 'Shopkeepers',
+    singular: 'shopkeeper',
+    addLabel: 'Add Shopkeeper',
+    dueLabel: 'You owe',
+    contactHint: 'e.g. 0300-1234567',
+  },
   customer: {
     title: 'Customers / Khata',
     singular: 'customer',

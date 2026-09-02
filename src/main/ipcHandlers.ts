@@ -99,7 +99,16 @@ export function registerIpcHandlers(db: Database.Database): void {
   });
 
   ipcMain.handle(IpcChannels.PAYMENT_RECORD, (_event, req: RecordPaymentRequest) => {
-    return recordPayment(db, req.partyType, req.partyId, req.amount, req.billId ?? null, req.note ?? null);
+    return recordPayment(
+      db,
+      req.partyType,
+      req.partyId,
+      req.amount,
+      req.billId ?? null,
+      req.note ?? null,
+      req.paymentMethod ?? null,
+      req.paymentDate
+    );
   });
 
   ipcMain.handle(IpcChannels.BILL_LIST_FOR_PARTY, (_event, req: ListBillsForPartyRequest) => {
