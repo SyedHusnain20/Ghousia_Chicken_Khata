@@ -6,6 +6,7 @@ import type {
   GetPartyRequest,
   ListPartiesRequest,
   DeletePartyRequest,
+  ForceDeletePartyRequest,
   AddEntryRequest,
   UpdateEntryRequest,
   DeleteEntryRequest,
@@ -28,6 +29,7 @@ import {
   getAllParties,
   getAllPartiesWithActivity,
   deleteParty,
+  forceDeleteParty,
   addEntry,
   updateEntry,
   deleteEntry,
@@ -76,6 +78,10 @@ export function registerIpcHandlers(db: Database.Database): void {
 
   ipcMain.handle(IpcChannels.PARTY_DELETE, (_event, req: DeletePartyRequest) => {
     deleteParty(db, req.partyType, req.partyId);
+  });
+
+  ipcMain.handle(IpcChannels.PARTY_FORCE_DELETE, (_event, req: ForceDeletePartyRequest) => {
+    forceDeleteParty(db, req.partyType, req.partyId, req.confirmName);
   });
 
   ipcMain.handle(IpcChannels.ENTRY_ADD, (_event, req: AddEntryRequest) => {

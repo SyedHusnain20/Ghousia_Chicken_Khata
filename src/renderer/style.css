@@ -197,6 +197,36 @@ a {
   gap: 12px;
 }
 
+.profile-header-actions-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.force-delete-box {
+  width: 100%;
+  max-width: 360px;
+  text-align: left;
+  background: var(--color-due-tint);
+  border: 1px solid var(--color-due);
+  border-radius: var(--radius-sm);
+  padding: 14px 16px;
+}
+
+.force-delete-box .field-hint {
+  margin-top: 0;
+}
+
+@media (max-width: 860px) {
+  .profile-header-actions-wrap {
+    align-items: stretch;
+  }
+  .force-delete-box {
+    max-width: none;
+  }
+}
+
 /* ---------------- Buttons ---------------- */
 
 .btn {

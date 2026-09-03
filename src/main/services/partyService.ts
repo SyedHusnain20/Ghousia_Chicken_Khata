@@ -109,7 +109,32 @@ export function deleteParty(db: Database.Database, partyType: PartyType, partyId
   db.prepare(`DELETE FROM ${t.party} WHERE id = ?`).run(partyId);
 }
 
+export function forceDeleteParty(
+  db: Database.Database,
+  partyType: PartyType,
+  partyId: number,
+  confirmName: string
+): void {
+  const t = tables(partyType);
+  const party = getParty(db, partyType, partyId);
+
+  // Requiring the exact name (not just a Yes/No click) makes this much
+  // harder to trigger by accident - matches how other apps gate a
+  // genuinely destructive, no-undo action.
+  if (confirmName.trim().toLowerCase() !== party.name.trim().toLowerCase()) {
+    throw new Error('The name you typed doesn\u2019t match. Nothing was deleted.');
+  }
+
+  db.transaction(() => {
+    db.prepare(`DELETE FROM payments WHERE party_type = ? AND party_id = ?`).run(partyType, partyId);
+    db.prepare(`DELETE FROM ${t.entries} WHERE ${t.fk} = ?`).run(partyId);
+    db.prepare(`DELETE FROM ${t.bills} WHERE ${t.fk} = ?`).run(partyId);
+    db.prepare(`DELETE FROM ${t.party} WHERE id = ?`).run(partyId);
+  })();
+}
+
 export const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
 
 // Pakistan Standard Time is a fixed UTC+5 offset with no daylight saving,
 // so it's computed explicitly from UTC fields rather than relying on the

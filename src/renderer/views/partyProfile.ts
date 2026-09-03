@@ -49,12 +49,54 @@ function backLink(partyType: PartyType): HTMLElement {
 function deletePartyControls(party: Party, partyType: PartyType): HTMLElement {
   const copy = COPY[partyType];
   const errorSlot = el('div', { class: 'form-error-slot' });
+  const forceDeleteWrap = el('div', {});
   const deleteBtn = el('button', { class: 'btn btn-danger btn-small', type: 'button' }, [
     `Delete ${copy.title}`,
   ]) as HTMLButtonElement;
 
+  function showForceDeleteOption() {
+    const nameInput = el('input', { type: 'text', placeholder: `Type "${party.name}" to confirm` }) as HTMLInputElement;
+    const forceBtn = el('button', { class: 'btn btn-danger btn-small', type: 'button' }, [
+      'Permanently Delete Everything',
+    ]) as HTMLButtonElement;
+    const cancelBtn = el('button', { class: 'btn btn-secondary btn-small', type: 'button' }, ['Cancel']);
+    const forceErrorSlot = el('div', { class: 'form-error-slot' });
+
+    cancelBtn.addEventListener('click', () => forceDeleteWrap.replaceChildren());
+
+    forceBtn.addEventListener('click', async () => {
+      forceErrorSlot.replaceChildren();
+      const finalConfirm = window.confirm(
+        `This will PERMANENTLY delete ${party.name} and every purchase, sale, bill, and payment ever logged against them. ` +
+          `This cannot be undone and will change past Daily Ledger totals for any day they appeared in. Are you absolutely sure?`
+      );
+      if (!finalConfirm) return;
+
+      forceBtn.disabled = true;
+      try {
+        await window.khata.forceDeleteParty({ partyType, partyId: party.id, confirmName: nameInput.value });
+        navigate(copy.listPath);
+      } catch (err) {
+        forceErrorSlot.replaceChildren(errorBanner(errorMessage(err)));
+        forceBtn.disabled = false;
+      }
+    });
+
+    forceDeleteWrap.replaceChildren(
+      el('div', { class: 'force-delete-box' }, [
+        el('p', { class: 'field-hint' }, [
+          `If ${party.name} was entered by mistake, you can permanently remove them and everything logged against them instead. This is not reversible.`,
+        ]),
+        el('div', { class: 'form-grid form-grid-tight' }, [el('label', {}, ['Confirm name', nameInput])]),
+        forceErrorSlot,
+        el('div', { class: 'form-actions' }, [forceBtn, cancelBtn]),
+      ])
+    );
+  }
+
   deleteBtn.addEventListener('click', async () => {
     errorSlot.replaceChildren();
+    forceDeleteWrap.replaceChildren();
     const confirmed = window.confirm(
       `Delete ${party.name}? This can\u2019t be undone. This only works if they have no outstanding balance and no transaction history yet.`
     );
@@ -66,11 +108,15 @@ function deletePartyControls(party: Party, partyType: PartyType): HTMLElement {
       navigate(copy.listPath);
     } catch (err) {
       errorSlot.replaceChildren(errorBanner(errorMessage(err)));
+      showForceDeleteOption();
       deleteBtn.disabled = false;
     }
   });
 
-  return el('div', { class: 'profile-header-actions' }, [deleteBtn, errorSlot]);
+  return el('div', { class: 'profile-header-actions-wrap' }, [
+    el('div', { class: 'profile-header-actions' }, [deleteBtn, errorSlot]),
+    forceDeleteWrap,
+  ]);
 }
 
 function dueHero(party: Party, partyType: PartyType): HTMLElement {

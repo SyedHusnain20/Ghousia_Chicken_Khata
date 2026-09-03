@@ -23,6 +23,7 @@ export const IpcChannels = {
   PARTY_LIST: 'party:list',
   PARTY_LIST_WITH_ACTIVITY: 'party:list-with-activity',
   PARTY_DELETE: 'party:delete',
+  PARTY_FORCE_DELETE: 'party:force-delete',
   ENTRY_ADD: 'entry:add',
   ENTRY_UPDATE: 'entry:update',
   ENTRY_DELETE: 'entry:delete',
@@ -64,6 +65,12 @@ export interface GetPartyRequest {
 export interface DeletePartyRequest {
   partyType: PartyType;
   partyId: number;
+}
+
+export interface ForceDeletePartyRequest {
+  partyType: PartyType;
+  partyId: number;
+  confirmName: string; // must exactly match the party's name (case-insensitive) - checked server-side too
 }
 
 export interface ListPartiesRequest {
@@ -226,6 +233,12 @@ export interface KhataApi {
   listParties(req: ListPartiesRequest): Promise<Party[]>;
   listPartiesWithActivity(req: ListPartiesRequest): Promise<PartyWithActivity[]>;
   deleteParty(req: DeletePartyRequest): Promise<void>;
+  // Bypasses deleteParty's safe guardrail - permanently removes a party
+  // AND all their entries/bills/payments. Only for the specific situation
+  // where the whole party was entered by mistake. Requires the party's
+  // exact name as confirmation (also re-checked in the main process, not
+  // just here) since there's no undo.
+  forceDeleteParty(req: ForceDeletePartyRequest): Promise<void>;
   addEntry(req: AddEntryRequest): Promise<number>;
   updateEntry(req: UpdateEntryRequest): Promise<void>;
   deleteEntry(req: DeleteEntryRequest): Promise<void>;
