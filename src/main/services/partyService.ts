@@ -217,6 +217,20 @@ export function getUnbilledEntries(db: Database.Database, partyType: PartyType, 
 }
 
 /**
+ * Payments not yet attached to any bill - shown in the "Payments
+ * (unbilled)" section for the shopkeeper to optionally select and include
+ * next time they generate a bill. A payment already reduced the party's
+ * due the moment it was recorded (see recordPayment) - attaching it to a
+ * bill later is purely a documentation step, same as billing an entry
+ * doesn't change due either.
+ */
+export function getUnbilledPayments(db: Database.Database, partyType: PartyType, partyId: number): Payment[] {
+  return db
+    .prepare(`SELECT * FROM payments WHERE party_type = ? AND party_id = ? AND bill_id IS NULL ORDER BY paid_at`)
+    .all(partyType, partyId) as Payment[];
+}
+
+/**
  * Edits an existing entry - but only while it's still unbilled. Once an
  * entry is swept into a bill, that bill is an immutable snapshot (the
  * party may already have a printed copy of it), so editing it afterward
@@ -313,21 +327,21 @@ export function generateBill(
   db: Database.Database,
   partyType: PartyType,
   partyId: number,
-  paymentNow: number = 0,
-  entryIds?: number[]
+  entryIds?: number[],
+  paymentIds?: number[]
 ): Bill {
   const t = tables(partyType);
-  paymentNow = floorMoney(paymentNow);
 
   const run = db.transaction(() => {
     const party = getParty(db, partyType, partyId);
-    const allPending = getUnbilledEntries(db, partyType, partyId);
+    const allPendingEntries = getUnbilledEntries(db, partyType, partyId);
+    const allPendingPayments = getUnbilledPayments(db, partyType, partyId);
 
-    let pending: Entry[];
+    let pendingEntries: Entry[];
     if (entryIds) {
       const selectedSet = new Set(entryIds);
-      pending = allPending.filter((e) => selectedSet.has(e.id));
-      if (pending.length !== entryIds.length) {
+      pendingEntries = allPendingEntries.filter((e) => selectedSet.has(e.id));
+      if (pendingEntries.length !== entryIds.length) {
         throw new Error(
           'One or more selected entries are no longer available to bill (already billed, edited, or deleted) - please refresh and try again'
         );
@@ -335,28 +349,48 @@ export function generateBill(
     } else {
       // No selection provided - bill everything unbilled, same as before
       // per-entry selection existed.
-      pending = allPending;
+      pendingEntries = allPendingEntries;
     }
 
-    if (pending.length === 0) {
-      throw new Error('No unbilled entries selected to generate a bill from');
+    let pendingPayments: Payment[];
+    if (paymentIds) {
+      const selectedSet = new Set(paymentIds);
+      pendingPayments = allPendingPayments.filter((p) => selectedSet.has(p.id));
+      if (pendingPayments.length !== paymentIds.length) {
+        throw new Error(
+          'One or more selected payments are no longer available to bill (already billed elsewhere) - please refresh and try again'
+        );
+      }
+    } else {
+      pendingPayments = allPendingPayments;
     }
 
-    const subtotal = floorMoney(pending.reduce((sum, e) => sum + e.line_total, 0));
+    if (pendingEntries.length === 0 && pendingPayments.length === 0) {
+      throw new Error('No unbilled entries or payments selected to generate a bill from');
+    }
+
+    const subtotal = floorMoney(pendingEntries.reduce((sum, e) => sum + e.line_total, 0));
+    const paymentsTotal = floorMoney(pendingPayments.reduce((sum, p) => sum + p.amount, 0));
+
     // "Previous due" is the true balance from BEFORE any currently-unbilled
-    // entries existed - current_due minus ALL of them (selected and
-    // unselected alike), not just the ones going into this bill. That way
-    // it's the same number no matter which subset gets picked, and never
-    // silently absorbs some other unbilled-but-unselected purchase into
-    // "previous due" just because it wasn't chosen for this bill.
-    const allUnbilledTotal = floorMoney(allPending.reduce((sum, e) => sum + e.line_total, 0));
-    const previousDue = floorMoney(party.current_due - allUnbilledTotal);
+    // activity existed - current_due, backing out ALL unbilled entries
+    // (selected and unselected alike) and adding back ALL unbilled
+    // payments (they already reduced current_due the moment they were
+    // recorded, so undoing that effect means adding them back). That way
+    // it's the same number no matter which subset of either gets picked
+    // for this specific bill.
+    const allUnbilledEntriesTotal = floorMoney(allPendingEntries.reduce((sum, e) => sum + e.line_total, 0));
+    const allUnbilledPaymentsTotal = floorMoney(allPendingPayments.reduce((sum, p) => sum + p.amount, 0));
+    const previousDue = floorMoney(party.current_due - allUnbilledEntriesTotal + allUnbilledPaymentsTotal);
     // This bill's own total is scoped to what it actually contains -
     // previous balance plus only the entries selected for it - not the
     // party's full current_due, which may still include other unbilled
-    // entries that aren't on this bill at all (those remain the party's
-    // problem to bill later, not something to pad this bill's total with).
+    // entries/payments that aren't on this bill at all.
     const totalDueAfterBill = floorMoney(previousDue + subtotal);
+    // Remaining due after whatever payments are being attached to this
+    // bill (pre-existing, selected just above - not a new payment; a
+    // payment already reduced current_due when it was originally recorded).
+    const remainingDue = floorMoney(totalDueAfterBill - paymentsTotal);
 
     const now = pakistanNow();
     const billDate = `${now.date} ${now.time}`;
@@ -364,29 +398,23 @@ export function generateBill(
       `INSERT INTO ${t.bills} (${t.fk}, bill_date, previous_due, subtotal, total_due_after_bill, remaining_due)
        VALUES (?, ?, ?, ?, ?, ?)`
     );
-    // remaining_due is finalized after payment below; insert a placeholder first
-    const billResult = insertBill.run(partyId, billDate, previousDue, subtotal, totalDueAfterBill, totalDueAfterBill);
+    const billResult = insertBill.run(partyId, billDate, previousDue, subtotal, totalDueAfterBill, remainingDue);
     const billId = billResult.lastInsertRowid as number;
 
-    // Lock the swept-up entries to this bill
+    // Lock the swept-up entries and payments to this bill - both simply
+    // get bill_id set; current_due is already correct either way (an
+    // entry already added to it when logged, a payment already subtracted
+    // from it when recorded - billing is purely documentation).
     const lockEntries = db.prepare(`UPDATE ${t.entries} SET bill_id = ? WHERE id = ?`);
-    for (const entry of pending) lockEntries.run(billId, entry.id);
+    for (const entry of pendingEntries) lockEntries.run(billId, entry.id);
 
-    // No current_due update here - it's already correct.
-
-    // Payment at bill-generation time is optional
-    if (paymentNow > 0) {
-      recordPayment(db, partyType, partyId, paymentNow, billId, 'Paid at bill generation');
-    }
-
-    // This bill's own remaining_due - scoped to what's actually on this
-    // bill (its own total minus any payment against it) - not the
-    // party's full current_due, which may still include other unbilled
-    // entries that were left out of this bill entirely.
-    const remainingDue = floorMoney(totalDueAfterBill - paymentNow);
-    db.prepare(`UPDATE ${t.bills} SET remaining_due = ? WHERE id = ?`).run(remainingDue, billId);
+    const lockPayments = db.prepare(`UPDATE payments SET bill_id = ? WHERE id = ?`);
+    for (const payment of pendingPayments) lockPayments.run(billId, payment.id);
 
     const items = db.prepare(`SELECT * FROM ${t.entries} WHERE bill_id = ?`).all(billId) as Entry[];
+    const payments = db
+      .prepare(`SELECT * FROM payments WHERE party_type = ? AND bill_id = ? ORDER BY paid_at`)
+      .all(partyType, billId) as Payment[];
 
     return {
       id: billId,
@@ -396,6 +424,7 @@ export function generateBill(
       total_due_after_bill: totalDueAfterBill,
       remaining_due: remainingDue,
       items,
+      payments,
     } as Bill;
   });
 
@@ -501,6 +530,10 @@ export function getBillById(db: Database.Database, partyType: PartyType, billId:
     .prepare(`SELECT * FROM ${t.entries} WHERE bill_id = ? ORDER BY entry_date`)
     .all(billId) as Entry[];
 
+  const payments = db
+    .prepare(`SELECT * FROM payments WHERE party_type = ? AND bill_id = ? ORDER BY paid_at`)
+    .all(partyType, billId) as Payment[];
+
   const partyId = bill[t.fk] as number;
   const party = getParty(db, partyType, partyId);
 
@@ -512,6 +545,7 @@ export function getBillById(db: Database.Database, partyType: PartyType, billId:
     total_due_after_bill: bill.total_due_after_bill,
     remaining_due: bill.remaining_due,
     items,
+    payments,
     party_type: partyType,
     party_id: partyId,
     party_name: party.name,

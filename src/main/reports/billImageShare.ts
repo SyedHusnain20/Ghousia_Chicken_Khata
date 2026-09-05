@@ -32,6 +32,16 @@ function formatDateTime(raw: string): string {
   return `${formatDate(raw)}, ${dt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
 }
 
+// Short, no-year form (e.g. '03-09') for per-row dates - the year is shown
+// once in the header meta above instead of repeating on every row.
+function formatDateShort(raw: string): string {
+  const datePart = raw.split(' ')[0];
+  const [, m, d] = datePart.split('-');
+  return `${d}-${m}`;
+}
+
+const PAYMENT_METHOD_LABEL: Record<string, string> = { cash: 'Cash', online: 'Online' };
+
 function escapeHtml(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
@@ -50,17 +60,28 @@ const PARTY_LABEL: Record<PartyType, string> = { supplier: 'Supplier', customer:
 // since main can't reuse renderer CSS/DOM code directly (see
 // tsconfig.json's renderer exclusion).
 function buildBillHtml(bill: BillDetail): string {
-  const paymentNow = Math.floor(bill.total_due_after_bill - bill.remaining_due);
+  const paidTotal = Math.floor(bill.payments.reduce((sum, p) => sum + p.amount, 0));
 
   const itemRows = bill.items
     .map(
       (item) => `
       <tr>
-        <td>${formatDate(item.entry_date)}</td>
+        <td>${formatDateShort(item.entry_date)}</td>
         <td>${escapeHtml(item.item_name)}</td>
         <td class="num">${item.weight_kg}</td>
         <td class="num">${formatRs(item.rate_per_kg)}</td>
         <td class="num">${formatRs(item.line_total)}</td>
+      </tr>`
+    )
+    .join('');
+
+  const paymentRows = bill.payments
+    .map(
+      (payment) => `
+      <tr>
+        <td>${formatDateShort(payment.paid_at)}</td>
+        <td>${payment.payment_method ? PAYMENT_METHOD_LABEL[payment.payment_method] : '\u2014'}</td>
+        <td class="num">${formatRs(payment.amount)}</td>
       </tr>`
     )
     .join('');
@@ -146,6 +167,11 @@ function buildBillHtml(bill: BillDetail): string {
     padding: 5px 4px;
     border-bottom: 1px dotted #DED4B8;
   }
+  .payments-table {
+    margin-top: -6px;
+    padding-top: 8px;
+    border-top: 1px dashed #DED4B8;
+  }
   .totals {
     border-top: 1px dashed #DED4B8;
     padding-top: 10px;
@@ -195,11 +221,21 @@ function buildBillHtml(bill: BillDetail): string {
     </thead>
     <tbody>${itemRows}</tbody>
   </table>
+  ${
+    bill.payments.length > 0
+      ? `<table class="payments-table">
+    <thead>
+      <tr><th>Date</th><th>Method</th><th class="num">Paid</th></tr>
+    </thead>
+    <tbody>${paymentRows}</tbody>
+  </table>`
+      : ''
+  }
   <div class="totals">
     <div class="total-row"><span>This bill's purchases</span><span>${formatRs(bill.subtotal)}</span></div>
     <div class="total-row"><span>Previous due</span><span>${formatRs(bill.previous_due)}</span></div>
     <div class="total-row total-grand"><span>Grand total</span><span>${formatRs(bill.total_due_after_bill)}</span></div>
-    <div class="total-row"><span>Paid now</span><span>${paymentNow > 0 ? formatRs(paymentNow) : '\u2014 (not paid yet)'}</span></div>
+    <div class="total-row"><span>Total paid</span><span>${paidTotal > 0 ? formatRs(paidTotal) : '\u2014 (not paid yet)'}</span></div>
     <div class="total-row total-remaining"><span>Remaining due</span><span>${formatRs(bill.remaining_due)}</span></div>
   </div>
   <div class="footer">

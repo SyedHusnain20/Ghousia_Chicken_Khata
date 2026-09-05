@@ -68,6 +68,16 @@ export function formatDate(raw: string): string {
   return `${Number(d)} ${monthLabel} ${y}`;
 }
 
+// Short, no-year form (e.g. '03-09') for per-row dates on a bill, where
+// the year is shown once in the bill's own header instead of repeating on
+// every purchase/sale/payment row.
+export function formatDateShort(raw: string): string {
+  const datePart = raw.slice(0, 10);
+  const [, m, d] = datePart.split('-');
+  if (!m || !d) return raw;
+  return `${d}-${m}`;
+}
+
 export function formatDateTime(raw: string): string {
   const [datePart, timePart] = raw.split(' ');
   if (!timePart) return formatDate(raw);

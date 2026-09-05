@@ -540,60 +540,149 @@ function billsTable(bills: BillListItem[], partyType: PartyType): HTMLElement {
 // printable bill on success. Only the entries currently checked in the
 // table above (selectedIds) go into the bill - anything left unchecked
 // stays unbilled for a later one.
+const PAYMENT_METHOD_LABEL: Record<string, string> = { cash: 'Cash', online: 'Online' };
+
+function renderPaymentsUnbilledTable(
+  wrap: HTMLElement,
+  payments: Payment[],
+  selectedIds: Set<number>,
+  onSelectionChange: () => void
+): void {
+  if (payments.length === 0) {
+    mount(wrap, emptyState('No unbilled payments.'));
+    return;
+  }
+
+  function render() {
+    const selectAllCheckbox = el('input', { type: 'checkbox' }) as HTMLInputElement;
+    selectAllCheckbox.checked = payments.length > 0 && payments.every((p) => selectedIds.has(p.id));
+    selectAllCheckbox.addEventListener('change', () => {
+      if (selectAllCheckbox.checked) {
+        payments.forEach((p) => selectedIds.add(p.id));
+      } else {
+        payments.forEach((p) => selectedIds.delete(p.id));
+      }
+      render();
+      onSelectionChange();
+    });
+
+    const rows = payments.map((payment) => {
+      const rowCheckbox = el('input', { type: 'checkbox' }) as HTMLInputElement;
+      rowCheckbox.checked = selectedIds.has(payment.id);
+      rowCheckbox.addEventListener('change', () => {
+        if (rowCheckbox.checked) selectedIds.add(payment.id);
+        else selectedIds.delete(payment.id);
+        selectAllCheckbox.checked = payments.every((p) => selectedIds.has(p.id));
+        onSelectionChange();
+      });
+
+      return el('tr', {}, [
+        el('td', {}, [rowCheckbox]),
+        el('td', {}, [formatDateTime(payment.paid_at)]),
+        el('td', { class: 'cell-muted' }, [payment.payment_method ? PAYMENT_METHOD_LABEL[payment.payment_method] : '\u2014']),
+        el('td', { class: 'cell-number cell-strong' }, [formatRs(payment.amount)]),
+      ]);
+    });
+
+    const total = payments.reduce((sum, p) => sum + p.amount, 0);
+    mount(
+      wrap,
+      el('table', { class: 'data-table' }, [
+        el('thead', {}, [
+          el('tr', {}, [
+            el('th', {}, [selectAllCheckbox]),
+            el('th', {}, ['Date']),
+            el('th', {}, ['Method']),
+            el('th', { class: 'th-right' }, ['Amount']),
+          ]),
+        ]),
+        el('tbody', {}, rows),
+        el('tfoot', {}, [
+          el('tr', {}, [
+            el('td', { colspan: '3' }, ['Unbilled payments total']),
+            el('td', { class: 'cell-number cell-strong' }, [formatRs(total)]),
+          ]),
+        ]),
+      ])
+    );
+  }
+
+  render();
+}
+
 function generateBillPanel(
   partyType: PartyType,
   partyId: number,
   entries: Entry[],
-  selectedIds: Set<number>,
+  selectedEntryIds: Set<number>,
+  payments: Payment[],
+  selectedPaymentIds: Set<number>,
   currentDue: number
 ): HTMLElement {
-  if (entries.length === 0) {
+  if (entries.length === 0 && payments.length === 0) {
     return el('p', { class: 'field-hint' }, [
-      'There are no unbilled entries yet, so there\u2019s nothing to put on a bill.',
+      'There are no unbilled purchases/sales or payments yet, so there\u2019s nothing to put on a bill.',
     ]);
   }
 
-  const selected = entries.filter((e) => selectedIds.has(e.id));
+  const selectedEntries = entries.filter((e) => selectedEntryIds.has(e.id));
+  const selectedPayments = payments.filter((p) => selectedPaymentIds.has(p.id));
 
-  if (selected.length === 0) {
+  if (selectedEntries.length === 0 && selectedPayments.length === 0) {
     return el('p', { class: 'field-hint' }, [
-      'No entries are selected. Check the ones you want to include above (or use the header checkbox to select all), then come back here to generate the bill.',
+      'Nothing is selected. Check the purchases/sales and/or payments above you want to include, then come back here to generate the bill.',
     ]);
   }
 
-  const subtotal = floorMoney(selected.reduce((sum, e) => sum + e.line_total, 0));
-  // "Previous due" is the true balance from BEFORE any currently-unbilled
-  // entries existed - currentDue minus ALL of them (selected and
-  // unselected alike), not just the ones going into this bill. Matches
-  // generateBill's own calculation exactly, so this preview never shows a
-  // different number than what actually gets generated.
-  const allUnbilledTotal = floorMoney(entries.reduce((sum, e) => sum + e.line_total, 0));
-  const previousDue = floorMoney(currentDue - allUnbilledTotal);
-  // This bill's own total - previous balance plus only what's selected,
-  // not the party's full currentDue (which may still include other
-  // unbilled entries left out of this bill entirely).
+  const subtotal = floorMoney(selectedEntries.reduce((sum, e) => sum + e.line_total, 0));
+  const paymentsTotal = floorMoney(selectedPayments.reduce((sum, p) => sum + p.amount, 0));
+  // Matches generateBill's exact formula: previousDue is the true balance
+  // from BEFORE any currently-unbilled activity existed - currentDue,
+  // backing out ALL unbilled entries and adding back ALL unbilled
+  // payments (they already reduced currentDue when recorded, so undoing
+  // that means adding them back), regardless of what's selected here.
+  const allUnbilledEntriesTotal = floorMoney(entries.reduce((sum, e) => sum + e.line_total, 0));
+  const allUnbilledPaymentsTotal = floorMoney(payments.reduce((sum, p) => sum + p.amount, 0));
+  const previousDue = floorMoney(currentDue - allUnbilledEntriesTotal + allUnbilledPaymentsTotal);
   const grandTotal = floorMoney(previousDue + subtotal);
+  const remainingDue = floorMoney(grandTotal - paymentsTotal);
 
-  const paymentInput = el('input', { type: 'number', step: '0.01', min: '0', placeholder: '0 (optional)' }) as HTMLInputElement;
   const errorSlot = el('div', { class: 'form-error-slot' });
 
-  const form = el('form', { class: 'inline-form' }, [
-    el('div', { class: 'bill-preview' }, [
+  const previewRows: HTMLElement[] = [
+    el('div', { class: 'bill-preview-row' }, [
+      el('span', {}, [
+        `${selectedEntries.length} selected entr${selectedEntries.length === 1 ? 'y' : 'ies'}${
+          selectedEntries.length < entries.length ? ` (of ${entries.length} unbilled)` : ''
+        }`,
+      ]),
+      el('span', {}, [formatRs(subtotal)]),
+    ]),
+    el('div', { class: 'bill-preview-row' }, [el('span', {}, ['Previous due']), el('span', {}, [formatRs(previousDue)])]),
+    el('div', { class: 'bill-preview-row bill-preview-grand' }, [
+      el('span', {}, ['Grand total']),
+      el('span', {}, [formatRs(grandTotal)]),
+    ]),
+  ];
+  if (selectedPayments.length > 0) {
+    previewRows.push(
       el('div', { class: 'bill-preview-row' }, [
         el('span', {}, [
-          `${selected.length} selected entr${selected.length === 1 ? 'y' : 'ies'}${
-            selected.length < entries.length ? ` (of ${entries.length} unbilled)` : ''
+          `${selectedPayments.length} selected payment${selectedPayments.length === 1 ? '' : 's'}${
+            selectedPayments.length < payments.length ? ` (of ${payments.length} unbilled)` : ''
           }`,
         ]),
-        el('span', {}, [formatRs(subtotal)]),
+        el('span', {}, [formatRs(paymentsTotal)]),
       ]),
-      el('div', { class: 'bill-preview-row' }, [el('span', {}, ['Previous due']), el('span', {}, [formatRs(previousDue)])]),
       el('div', { class: 'bill-preview-row bill-preview-grand' }, [
-        el('span', {}, ['Grand total']),
-        el('span', {}, [formatRs(grandTotal)]),
-      ]),
-    ]),
-    el('label', {}, ['Payment now (optional, Rs.)', paymentInput]),
+        el('span', {}, ['Remaining due']),
+        el('span', {}, [formatRs(remainingDue)]),
+      ])
+    );
+  }
+
+  const form = el('form', { class: 'inline-form' }, [
+    el('div', { class: 'bill-preview' }, previewRows),
     errorSlot,
     el('div', { class: 'form-actions' }, [
       el('button', { class: 'btn btn-primary', type: 'submit' }, ['Generate Bill']),
@@ -604,25 +693,14 @@ function generateBillPanel(
     e.preventDefault();
     errorSlot.replaceChildren();
 
-    const raw = paymentInput.value.trim();
-    const paymentNow = raw === '' ? 0 : Number(raw);
-    if (!Number.isFinite(paymentNow) || paymentNow < 0) {
-      errorSlot.append(errorBanner('Payment now must be zero or a positive number.'));
-      return;
-    }
-    if (paymentNow > grandTotal) {
-      errorSlot.append(errorBanner(`Payment now can\u2019t exceed the grand total of ${formatRs(grandTotal)}.`));
-      return;
-    }
-
     const submitBtn = form.querySelector('button[type="submit"]') as HTMLButtonElement;
     submitBtn.disabled = true;
     try {
       const bill = await window.khata.generateBill({
         partyType,
         partyId,
-        paymentNow,
-        entryIds: selected.map((e) => e.id),
+        entryIds: selectedEntries.map((e) => e.id),
+        paymentIds: selectedPayments.map((p) => p.id),
       });
       navigate(`/bills/${partyType}/${bill.id}`);
     } catch (err) {
@@ -643,12 +721,14 @@ export async function renderPartyProfile(
 
   let party: Party;
   let entries: Entry[];
+  let unbilledPayments: Payment[];
   let payments: Payment[];
   let bills: BillListItem[];
   try {
-    [party, entries, payments, bills] = await Promise.all([
+    [party, entries, unbilledPayments, payments, bills] = await Promise.all([
       window.khata.getParty({ partyType, partyId }),
       window.khata.listUnbilledEntries({ partyType, partyId }),
+      window.khata.listUnbilledPayments({ partyType, partyId }),
       window.khata.listPayments({ partyType, partyId }),
       window.khata.listBillsForParty({ partyType, partyId }),
     ]);
@@ -659,6 +739,7 @@ export async function renderPartyProfile(
 
   const copy = COPY[partyType];
   const entriesWrap = el('div', {});
+  const unbilledPaymentsWrap = el('div', {});
   const paymentsWrap = el('div', {});
   const billsWrap = el('div', {});
   const heroWrap = el('div', {});
@@ -667,19 +748,32 @@ export async function renderPartyProfile(
   const paymentFormWrap = el('div', {});
   const deleteWrap = el('div', {});
 
-  // Which unbilled entries are checked for the next bill. Defaults to
-  // "everything" whenever entries are (re)fetched - matches the old
-  // behavior (bill everything) unless the shopkeeper deliberately
+  // Which unbilled entries/payments are checked for the next bill.
+  // Defaults to "everything" whenever data is (re)fetched - matches the
+  // old behavior (bill everything) unless the shopkeeper deliberately
   // unchecks specific ones for a partial bill.
   let selectedEntryIds = new Set<number>(entries.map((e) => e.id));
+  let selectedPaymentIds = new Set<number>(unbilledPayments.map((p) => p.id));
 
   function renderBillPanel() {
-    mount(generateBillWrap, generateBillPanel(partyType, partyId, entries, selectedEntryIds, party.current_due));
+    mount(
+      generateBillWrap,
+      generateBillPanel(
+        partyType,
+        partyId,
+        entries,
+        selectedEntryIds,
+        unbilledPayments,
+        selectedPaymentIds,
+        party.current_due
+      )
+    );
   }
 
   function refreshStatic() {
     mount(heroWrap, dueHero(party, partyType));
     renderEntriesTable(entriesWrap, entries, partyType, partyId, selectedEntryIds, renderBillPanel, reload);
+    renderPaymentsUnbilledTable(unbilledPaymentsWrap, unbilledPayments, selectedPaymentIds, renderBillPanel);
     mount(paymentsWrap, paymentsTable(payments));
     mount(billsWrap, billsTable(bills, partyType));
     renderBillPanel();
@@ -687,13 +781,15 @@ export async function renderPartyProfile(
   }
 
   async function reload() {
-    [party, entries, payments, bills] = await Promise.all([
+    [party, entries, unbilledPayments, payments, bills] = await Promise.all([
       window.khata.getParty({ partyType, partyId }),
       window.khata.listUnbilledEntries({ partyType, partyId }),
+      window.khata.listUnbilledPayments({ partyType, partyId }),
       window.khata.listPayments({ partyType, partyId }),
       window.khata.listBillsForParty({ partyType, partyId }),
     ]);
     selectedEntryIds = new Set(entries.map((e) => e.id));
+    selectedPaymentIds = new Set(unbilledPayments.map((p) => p.id));
     refreshStatic();
     // Forms read party.current_due / entries at build time, so they're
     // rebuilt fresh on every reload rather than mutated in place.
@@ -715,6 +811,7 @@ export async function renderPartyProfile(
       el('section', { class: 'panel' }, [el('h2', {}, ['Make a Payment']), paymentFormWrap]),
     ]),
     el('section', { class: 'panel' }, [el('h2', {}, [copy.addEntryLabel]), entriesWrap]),
+    el('section', { class: 'panel' }, [el('h2', {}, ['Payments (unbilled)']), unbilledPaymentsWrap]),
     el('section', { class: 'panel' }, [el('h2', {}, ['Generate Bill']), generateBillWrap]),
     el('section', { class: 'panel' }, [el('h2', {}, ['Bill History']), billsWrap]),
     el('section', { class: 'panel' }, [el('h2', {}, ['Payment History']), paymentsWrap])

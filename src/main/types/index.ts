@@ -37,6 +37,7 @@ export interface Bill {
   total_due_after_bill: number;
   remaining_due: number;
   items: Entry[];
+  payments: Payment[];
 }
 
 // One row in a bill-history list (profile page or the global Bills

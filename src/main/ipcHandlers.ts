@@ -17,6 +17,7 @@ import type {
   ListAllBillsRequest,
   RecordPaymentRequest,
   ListPaymentsRequest,
+  ListUnbilledPaymentsRequest,
   CreateDailyLedgerRequest,
   GetDailyLedgerRequest,
   UpdateDailyLedgerFieldsRequest,
@@ -34,6 +35,7 @@ import {
   updateEntry,
   deleteEntry,
   getUnbilledEntries,
+  getUnbilledPayments,
   generateBill,
   getBillsForParty,
   getBillById,
@@ -101,7 +103,11 @@ export function registerIpcHandlers(db: Database.Database): void {
   });
 
   ipcMain.handle(IpcChannels.BILL_GENERATE, (_event, req: GenerateBillRequest) => {
-    return generateBill(db, req.partyType, req.partyId, req.paymentNow ?? 0, req.entryIds);
+    return generateBill(db, req.partyType, req.partyId, req.entryIds, req.paymentIds);
+  });
+
+  ipcMain.handle(IpcChannels.PAYMENT_LIST_UNBILLED, (_event, req: ListUnbilledPaymentsRequest) => {
+    return getUnbilledPayments(db, req.partyType, req.partyId);
   });
 
   ipcMain.handle(IpcChannels.PAYMENT_RECORD, (_event, req: RecordPaymentRequest) => {

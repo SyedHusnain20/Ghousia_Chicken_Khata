@@ -34,6 +34,7 @@ export const IpcChannels = {
   BILL_LIST_ALL: 'bill:list-all',
   PAYMENT_RECORD: 'payment:record',
   PAYMENT_LIST: 'payment:list',
+  PAYMENT_LIST_UNBILLED: 'payment:list-unbilled',
   DAILY_LEDGER_CREATE: 'daily-ledger:create',
   DAILY_LEDGER_GET: 'daily-ledger:get',
   DAILY_LEDGER_UPDATE_FIELDS: 'daily-ledger:update-fields',
@@ -110,11 +111,21 @@ export interface ListUnbilledEntriesRequest {
 export interface GenerateBillRequest {
   partyType: PartyType;
   partyId: number;
-  paymentNow?: number;
   // Which unbilled entries to include - omit to bill everything unbilled
   // (the old default). When provided, only these entries get swept into
   // the bill; the rest stay unbilled for a later one.
   entryIds?: number[];
+  // Which unbilled (already-recorded, standalone) payments to attach to
+  // this bill - omit to attach everything currently unbilled. Record a
+  // new payment first via recordPayment (Make a Payment), then include it
+  // here once it shows up as unbilled - there's no separate "pay now while
+  // generating" input anymore.
+  paymentIds?: number[];
+}
+
+export interface ListUnbilledPaymentsRequest {
+  partyType: PartyType;
+  partyId: number;
 }
 
 export interface RecordPaymentRequest {
@@ -248,6 +259,7 @@ export interface KhataApi {
   getBill(req: GetBillRequest): Promise<BillDetail>;
   listAllBills(req: ListAllBillsRequest): Promise<BillListItem[]>;
   recordPayment(req: RecordPaymentRequest): Promise<Payment>;
+  listUnbilledPayments(req: ListUnbilledPaymentsRequest): Promise<Payment[]>;
   listPayments(req: ListPaymentsRequest): Promise<Payment[]>;
   createDailyLedger(req: CreateDailyLedgerRequest): Promise<DailyLedger>;
   getDailyLedger(req: GetDailyLedgerRequest): Promise<DailyLedgerDetail>;

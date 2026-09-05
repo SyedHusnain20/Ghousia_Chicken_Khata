@@ -1,5 +1,5 @@
 import { el, mount } from '../dom';
-import { formatDate, formatDateTime, formatRs } from '../format';
+import { formatDateShort, formatDateTime, formatRs } from '../format';
 import { button, errorBanner, errorMessage, loadingState, successBanner } from '../components';
 import { SHOP_NAME_EN, SHOP_NAME_UR } from '../shopConfig';
 import type { BillDetail, PartyType } from '../../main/types';
@@ -10,17 +10,26 @@ const TITLE: Record<PartyType, string> = {
   shopkeeper: 'Shopkeeper Bill',
 };
 const PARTY_LABEL: Record<PartyType, string> = { supplier: 'Supplier', customer: 'Customer', shopkeeper: 'Shopkeeper' };
+const PAYMENT_METHOD_LABEL: Record<string, string> = { cash: 'Cash', online: 'Online' };
 
 function receiptMarkup(bill: BillDetail): HTMLElement {
-  const paymentNow = Math.floor(bill.total_due_after_bill - bill.remaining_due);
+  const paidTotal = Math.floor(bill.payments.reduce((sum, p) => sum + p.amount, 0));
 
   const itemRows = bill.items.map((item) =>
     el('tr', {}, [
-      el('td', {}, [formatDate(item.entry_date)]),
+      el('td', {}, [formatDateShort(item.entry_date)]),
       el('td', {}, [item.item_name]),
       el('td', { class: 'cell-number' }, [String(item.weight_kg)]),
       el('td', { class: 'cell-number' }, [formatRs(item.rate_per_kg)]),
       el('td', { class: 'cell-number' }, [formatRs(item.line_total)]),
+    ])
+  );
+
+  const paymentRows = bill.payments.map((payment) =>
+    el('tr', {}, [
+      el('td', {}, [formatDateShort(payment.paid_at)]),
+      el('td', {}, [payment.payment_method ? PAYMENT_METHOD_LABEL[payment.payment_method] : '\u2014']),
+      el('td', { class: 'cell-number' }, [formatRs(payment.amount)]),
     ])
   );
 
@@ -50,6 +59,18 @@ function receiptMarkup(bill: BillDetail): HTMLElement {
       ]),
       el('tbody', {}, itemRows),
     ]),
+    bill.payments.length > 0
+      ? el('table', { class: 'receipt-items receipt-payments' }, [
+          el('thead', {}, [
+            el('tr', {}, [
+              el('th', {}, ['Date']),
+              el('th', {}, ['Method']),
+              el('th', { class: 'th-right' }, ['Paid']),
+            ]),
+          ]),
+          el('tbody', {}, paymentRows),
+        ])
+      : null,
     el('div', { class: 'receipt-totals' }, [
       el('div', { class: 'receipt-total-row' }, [el('span', {}, ['This bill\u2019s purchases']), el('span', {}, [formatRs(bill.subtotal)])]),
       el('div', { class: 'receipt-total-row' }, [el('span', {}, ['Previous due']), el('span', {}, [formatRs(bill.previous_due)])]),
@@ -57,9 +78,9 @@ function receiptMarkup(bill: BillDetail): HTMLElement {
         el('span', {}, ['Grand total']),
         el('span', {}, [formatRs(bill.total_due_after_bill)]),
       ]),
-      paymentNow > 0
-        ? el('div', { class: 'receipt-total-row' }, [el('span', {}, ['Paid now']), el('span', {}, [formatRs(paymentNow)])])
-        : el('div', { class: 'receipt-total-row' }, [el('span', {}, ['Paid now']), el('span', {}, ['\u2014 (not paid yet)'])]),
+      paidTotal > 0
+        ? el('div', { class: 'receipt-total-row' }, [el('span', {}, ['Total paid']), el('span', {}, [formatRs(paidTotal)])])
+        : el('div', { class: 'receipt-total-row' }, [el('span', {}, ['Total paid']), el('span', {}, ['\u2014 (not paid yet)'])]),
       el('div', { class: 'receipt-total-row receipt-total-remaining' }, [
         el('span', {}, ['Remaining due']),
         el('span', {}, [formatRs(bill.remaining_due)]),
