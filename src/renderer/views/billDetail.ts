@@ -60,15 +60,18 @@ function receiptMarkup(bill: BillDetail): HTMLElement {
       el('tbody', {}, itemRows),
     ]),
     bill.payments.length > 0
-      ? el('table', { class: 'receipt-items receipt-payments' }, [
-          el('thead', {}, [
-            el('tr', {}, [
-              el('th', {}, ['Date']),
-              el('th', {}, ['Method']),
-              el('th', { class: 'th-right' }, ['Paid']),
+      ? el('div', { class: 'receipt-section' }, [
+          el('div', { class: 'receipt-section-label' }, ['Payments']),
+          el('table', { class: 'receipt-items receipt-payments' }, [
+            el('thead', {}, [
+              el('tr', {}, [
+                el('th', {}, ['Date']),
+                el('th', {}, ['Method']),
+                el('th', { class: 'th-right' }, ['Paid']),
+              ]),
             ]),
+            el('tbody', {}, paymentRows),
           ]),
-          el('tbody', {}, paymentRows),
         ])
       : null,
     el('div', { class: 'receipt-totals' }, [

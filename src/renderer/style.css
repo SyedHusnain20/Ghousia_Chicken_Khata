@@ -1009,10 +1009,19 @@ input:focus, select:focus, button:focus-visible, a:focus-visible, .clickable-row
   border-bottom: 1px dotted var(--color-border);
 }
 
-.receipt-payments {
-  margin-top: -4px;
+.receipt-section {
+  margin-top: 10px;
   padding-top: 10px;
-  border-top: 1px dashed var(--color-border);
+  border-top: 2px solid var(--color-primary);
+}
+
+.receipt-section-label {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  font-weight: 700;
+  color: var(--color-primary);
+  margin-bottom: 6px;
 }
 
 .receipt-totals {

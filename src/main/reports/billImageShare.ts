@@ -167,10 +167,18 @@ function buildBillHtml(bill: BillDetail): string {
     padding: 5px 4px;
     border-bottom: 1px dotted #DED4B8;
   }
-  .payments-table {
-    margin-top: -6px;
-    padding-top: 8px;
-    border-top: 1px dashed #DED4B8;
+  .payments-section {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 2px solid #7A2E2E;
+  }
+  .payments-section-label {
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    font-weight: 700;
+    color: #7A2E2E;
+    margin-bottom: 6px;
   }
   .totals {
     border-top: 1px dashed #DED4B8;
@@ -223,12 +231,15 @@ function buildBillHtml(bill: BillDetail): string {
   </table>
   ${
     bill.payments.length > 0
-      ? `<table class="payments-table">
+      ? `<div class="payments-section">
+    <div class="payments-section-label">Payments</div>
+    <table>
     <thead>
       <tr><th>Date</th><th>Method</th><th class="num">Paid</th></tr>
     </thead>
     <tbody>${paymentRows}</tbody>
-  </table>`
+  </table>
+  </div>`
       : ''
   }
   <div class="totals">
