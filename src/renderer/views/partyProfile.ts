@@ -134,6 +134,21 @@ function dueHero(party: Party, partyType: PartyType): HTMLElement {
   ]);
 }
 
+// addEntry() throws this exact marker (see partyService.ts's
+// findPossibleDuplicateEntry) when the same party/item/weight/rate/date
+// combination is already logged. Pulling the human-readable part out lets
+// the form ask "are you sure?" instead of just showing it as a hard error -
+// Electron's IPC layer sometimes wraps thrown messages (e.g. "Error
+// invoking remote method ...: Error: <message>"), so this searches for the
+// marker rather than assuming it's at the start of the string.
+const DUPLICATE_ENTRY_MARKER = 'DUPLICATE_ENTRY::';
+function duplicateWarningMessage(err: unknown): string | null {
+  const msg = errorMessage(err);
+  const idx = msg.indexOf(DUPLICATE_ENTRY_MARKER);
+  if (idx === -1) return null;
+  return msg.slice(idx + DUPLICATE_ENTRY_MARKER.length);
+}
+
 function addEntryForm(partyType: PartyType, partyId: number, onSaved: () => void): HTMLElement {
   const copy = COPY[partyType];
   const itemInput = el('input', { type: 'text', value: 'Chicken', maxlength: '60' }) as HTMLInputElement;
@@ -188,22 +203,37 @@ function addEntryForm(partyType: PartyType, partyId: number, onSaved: () => void
     const submitBtn = form.querySelector('button[type="submit"]') as HTMLButtonElement;
     submitBtn.disabled = true;
     try {
-      await window.khata.addEntry({
-        partyType,
-        partyId,
-        itemName: itemInput.value.trim() || 'Chicken',
-        weightKg,
-        ratePerKg,
-        entryDate: dateInput.value,
-      });
-      kgInput.value = '';
-      rateInput.value = '';
-      updatePreview();
-      onSaved();
-    } catch (err) {
-      errorSlot.replaceChildren(errorBanner(errorMessage(err)));
+      await trySave(false);
     } finally {
       submitBtn.disabled = false;
+    }
+
+    async function trySave(confirmDuplicate: boolean): Promise<void> {
+      try {
+        await window.khata.addEntry({
+          partyType,
+          partyId,
+          itemName: itemInput.value.trim() || 'Chicken',
+          weightKg,
+          ratePerKg,
+          entryDate: dateInput.value,
+          confirmDuplicate,
+        });
+        kgInput.value = '';
+        rateInput.value = '';
+        updatePreview();
+        onSaved();
+      } catch (err) {
+        const dupWarning = duplicateWarningMessage(err);
+        if (dupWarning && !confirmDuplicate) {
+          // Not a hard error - ask before saving a possible double entry.
+          if (window.confirm(dupWarning)) {
+            await trySave(true);
+          }
+          return;
+        }
+        errorSlot.replaceChildren(errorBanner(errorMessage(err)));
+      }
     }
   });
 

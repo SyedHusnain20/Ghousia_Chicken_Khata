@@ -167,6 +167,36 @@ export function pakistanNow(): { date: string; time: string } {
  * correctly and the actual time an entry was logged is preserved even for
  * backdated entries.
  */
+/**
+ * Looks for an existing entry against this party, on the same calendar
+ * date, with the exact same item/weight/rate - the fingerprint of an
+ * accidental double entry (e.g. the same paper delivery slip typed in
+ * twice). Matches regardless of billed status, since a duplicate that's
+ * already been swept into a bill is still a duplicate - it's just
+ * (per updateEntry/deleteEntry's rule) no longer editable/deletable
+ * through the normal UI once billed. Returns the most recent match, if
+ * any, so the caller can show its actual logged time in the warning.
+ */
+export function findPossibleDuplicateEntry(
+  db: Database.Database,
+  partyType: PartyType,
+  partyId: number,
+  itemName: string,
+  weightKg: number,
+  ratePerKg: number,
+  entryDateOnly: string
+): Entry | undefined {
+  const t = tables(partyType);
+  return db
+    .prepare(
+      `SELECT * FROM ${t.entries}
+       WHERE ${t.fk} = ? AND item_name = ? AND weight_kg = ? AND rate_per_kg = ? AND date(entry_date) = ?
+       ORDER BY id DESC
+       LIMIT 1`
+    )
+    .get(partyId, itemName, weightKg, ratePerKg, entryDateOnly) as Entry | undefined;
+}
+
 export function addEntry(
   db: Database.Database,
   partyType: PartyType,
@@ -174,7 +204,8 @@ export function addEntry(
   itemName: string,
   weightKg: number,
   ratePerKg: number,
-  entryDate?: string
+  entryDate?: string,
+  confirmDuplicate: boolean = false
 ): number {
   if (!Number.isFinite(weightKg) || weightKg <= 0) {
     throw new Error('Weight (KG) must be a number greater than zero');
@@ -188,6 +219,19 @@ export function addEntry(
 
   const t = tables(partyType);
   const lineTotal = floorMoney(weightKg * ratePerKg);
+
+  if (!confirmDuplicate) {
+    const entryDateOnly = entryDate ?? pakistanNow().date;
+    const dup = findPossibleDuplicateEntry(db, partyType, partyId, itemName, weightKg, ratePerKg, entryDateOnly);
+    if (dup) {
+      // Prefixed marker so the renderer can recognize this as a
+      // "confirm and retry" situation rather than a hard validation
+      // error - see addEntryForm's submit handler.
+      throw new Error(
+        `DUPLICATE_ENTRY::This looks like it might already be logged - ${dup.weight_kg}kg of ${dup.item_name} at Rs. ${dup.rate_per_kg}/kg was already added for ${entryDateOnly}. Add it again anyway?`
+      );
+    }
+  }
 
   const run = db.transaction(() => {
     const now = pakistanNow();

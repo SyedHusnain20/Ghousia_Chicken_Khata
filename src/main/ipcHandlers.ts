@@ -87,7 +87,16 @@ export function registerIpcHandlers(db: Database.Database): void {
   });
 
   ipcMain.handle(IpcChannels.ENTRY_ADD, (_event, req: AddEntryRequest) => {
-    return addEntry(db, req.partyType, req.partyId, req.itemName, req.weightKg, req.ratePerKg, req.entryDate);
+    return addEntry(
+      db,
+      req.partyType,
+      req.partyId,
+      req.itemName,
+      req.weightKg,
+      req.ratePerKg,
+      req.entryDate,
+      req.confirmDuplicate ?? false
+    );
   });
 
   ipcMain.handle(IpcChannels.ENTRY_UPDATE, (_event, req: UpdateEntryRequest) => {

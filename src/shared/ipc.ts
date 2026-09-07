@@ -85,6 +85,11 @@ export interface AddEntryRequest {
   weightKg: number;
   ratePerKg: number;
   entryDate?: string; // 'YYYY-MM-DD' - omit to use today
+  // Set true to skip the possible-duplicate check and save anyway - used
+  // when the shopkeeper has already been warned (same party/item/weight/
+  // rate/date already logged) and confirmed they want to add it again.
+  // Omit/false on the first attempt.
+  confirmDuplicate?: boolean;
 }
 
 export interface UpdateEntryRequest {

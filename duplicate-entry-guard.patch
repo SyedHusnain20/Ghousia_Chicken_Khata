@@ -1,0 +1,188 @@
+diff --git a/src/main/ipcHandlers.ts b/src/main/ipcHandlers.ts
+index df0971b..ac0a9f1 100644
+--- a/src/main/ipcHandlers.ts
++++ b/src/main/ipcHandlers.ts
+@@ -87,7 +87,16 @@ export function registerIpcHandlers(db: Database.Database): void {
+   });
+ 
+   ipcMain.handle(IpcChannels.ENTRY_ADD, (_event, req: AddEntryRequest) => {
+-    return addEntry(db, req.partyType, req.partyId, req.itemName, req.weightKg, req.ratePerKg, req.entryDate);
++    return addEntry(
++      db,
++      req.partyType,
++      req.partyId,
++      req.itemName,
++      req.weightKg,
++      req.ratePerKg,
++      req.entryDate,
++      req.confirmDuplicate ?? false
++    );
+   });
+ 
+   ipcMain.handle(IpcChannels.ENTRY_UPDATE, (_event, req: UpdateEntryRequest) => {
+diff --git a/src/main/services/partyService.ts b/src/main/services/partyService.ts
+index 57981df..94c7602 100644
+--- a/src/main/services/partyService.ts
++++ b/src/main/services/partyService.ts
+@@ -167,6 +167,36 @@ export function pakistanNow(): { date: string; time: string } {
+  * correctly and the actual time an entry was logged is preserved even for
+  * backdated entries.
+  */
++/**
++ * Looks for an existing entry against this party, on the same calendar
++ * date, with the exact same item/weight/rate - the fingerprint of an
++ * accidental double entry (e.g. the same paper delivery slip typed in
++ * twice). Matches regardless of billed status, since a duplicate that's
++ * already been swept into a bill is still a duplicate - it's just
++ * (per updateEntry/deleteEntry's rule) no longer editable/deletable
++ * through the normal UI once billed. Returns the most recent match, if
++ * any, so the caller can show its actual logged time in the warning.
++ */
++export function findPossibleDuplicateEntry(
++  db: Database.Database,
++  partyType: PartyType,
++  partyId: number,
++  itemName: string,
++  weightKg: number,
++  ratePerKg: number,
++  entryDateOnly: string
++): Entry | undefined {
++  const t = tables(partyType);
++  return db
++    .prepare(
++      `SELECT * FROM ${t.entries}
++       WHERE ${t.fk} = ? AND item_name = ? AND weight_kg = ? AND rate_per_kg = ? AND date(entry_date) = ?
++       ORDER BY id DESC
++       LIMIT 1`
++    )
++    .get(partyId, itemName, weightKg, ratePerKg, entryDateOnly) as Entry | undefined;
++}
++
+ export function addEntry(
+   db: Database.Database,
+   partyType: PartyType,
+@@ -174,7 +204,8 @@ export function addEntry(
+   itemName: string,
+   weightKg: number,
+   ratePerKg: number,
+-  entryDate?: string
++  entryDate?: string,
++  confirmDuplicate: boolean = false
+ ): number {
+   if (!Number.isFinite(weightKg) || weightKg <= 0) {
+     throw new Error('Weight (KG) must be a number greater than zero');
+@@ -189,6 +220,19 @@ export function addEntry(
+   const t = tables(partyType);
+   const lineTotal = floorMoney(weightKg * ratePerKg);
+ 
++  if (!confirmDuplicate) {
++    const entryDateOnly = entryDate ?? pakistanNow().date;
++    const dup = findPossibleDuplicateEntry(db, partyType, partyId, itemName, weightKg, ratePerKg, entryDateOnly);
++    if (dup) {
++      // Prefixed marker so the renderer can recognize this as a
++      // "confirm and retry" situation rather than a hard validation
++      // error - see addEntryForm's submit handler.
++      throw new Error(
++        `DUPLICATE_ENTRY::This looks like it might already be logged - ${dup.weight_kg}kg of ${dup.item_name} at Rs. ${dup.rate_per_kg}/kg was already added for ${entryDateOnly}. Add it again anyway?`
++      );
++    }
++  }
++
+   const run = db.transaction(() => {
+     const now = pakistanNow();
+     const stampedEntryDate = `${entryDate ?? now.date} ${now.time}`;
+diff --git a/src/renderer/views/partyProfile.ts b/src/renderer/views/partyProfile.ts
+index f15440b..eab2ccb 100644
+--- a/src/renderer/views/partyProfile.ts
++++ b/src/renderer/views/partyProfile.ts
+@@ -134,6 +134,21 @@ function dueHero(party: Party, partyType: PartyType): HTMLElement {
+   ]);
+ }
+ 
++// addEntry() throws this exact marker (see partyService.ts's
++// findPossibleDuplicateEntry) when the same party/item/weight/rate/date
++// combination is already logged. Pulling the human-readable part out lets
++// the form ask "are you sure?" instead of just showing it as a hard error -
++// Electron's IPC layer sometimes wraps thrown messages (e.g. "Error
++// invoking remote method ...: Error: <message>"), so this searches for the
++// marker rather than assuming it's at the start of the string.
++const DUPLICATE_ENTRY_MARKER = 'DUPLICATE_ENTRY::';
++function duplicateWarningMessage(err: unknown): string | null {
++  const msg = errorMessage(err);
++  const idx = msg.indexOf(DUPLICATE_ENTRY_MARKER);
++  if (idx === -1) return null;
++  return msg.slice(idx + DUPLICATE_ENTRY_MARKER.length);
++}
++
+ function addEntryForm(partyType: PartyType, partyId: number, onSaved: () => void): HTMLElement {
+   const copy = COPY[partyType];
+   const itemInput = el('input', { type: 'text', value: 'Chicken', maxlength: '60' }) as HTMLInputElement;
+@@ -188,23 +203,38 @@ function addEntryForm(partyType: PartyType, partyId: number, onSaved: () => void
+     const submitBtn = form.querySelector('button[type="submit"]') as HTMLButtonElement;
+     submitBtn.disabled = true;
+     try {
+-      await window.khata.addEntry({
+-        partyType,
+-        partyId,
+-        itemName: itemInput.value.trim() || 'Chicken',
+-        weightKg,
+-        ratePerKg,
+-        entryDate: dateInput.value,
+-      });
+-      kgInput.value = '';
+-      rateInput.value = '';
+-      updatePreview();
+-      onSaved();
+-    } catch (err) {
+-      errorSlot.replaceChildren(errorBanner(errorMessage(err)));
++      await trySave(false);
+     } finally {
+       submitBtn.disabled = false;
+     }
++
++    async function trySave(confirmDuplicate: boolean): Promise<void> {
++      try {
++        await window.khata.addEntry({
++          partyType,
++          partyId,
++          itemName: itemInput.value.trim() || 'Chicken',
++          weightKg,
++          ratePerKg,
++          entryDate: dateInput.value,
++          confirmDuplicate,
++        });
++        kgInput.value = '';
++        rateInput.value = '';
++        updatePreview();
++        onSaved();
++      } catch (err) {
++        const dupWarning = duplicateWarningMessage(err);
++        if (dupWarning && !confirmDuplicate) {
++          // Not a hard error - ask before saving a possible double entry.
++          if (window.confirm(dupWarning)) {
++            await trySave(true);
++          }
++          return;
++        }
++        errorSlot.replaceChildren(errorBanner(errorMessage(err)));
++      }
++    }
+   });
+ 
+   return form;
+diff --git a/src/shared/ipc.ts b/src/shared/ipc.ts
+index d53dcde..2349438 100644
+--- a/src/shared/ipc.ts
++++ b/src/shared/ipc.ts
+@@ -85,6 +85,11 @@ export interface AddEntryRequest {
+   weightKg: number;
+   ratePerKg: number;
+   entryDate?: string; // 'YYYY-MM-DD' - omit to use today
++  // Set true to skip the possible-duplicate check and save anyway - used
++  // when the shopkeeper has already been warned (same party/item/weight/
++  // rate/date already logged) and confirmed they want to add it again.
++  // Omit/false on the first attempt.
++  confirmDuplicate?: boolean;
+ }
+ 
+ export interface UpdateEntryRequest {
