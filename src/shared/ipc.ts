@@ -126,6 +126,11 @@ export interface GenerateBillRequest {
   // here once it shows up as unbilled - there's no separate "pay now while
   // generating" input anymore.
   paymentIds?: number[];
+  // Set true to skip the possible-duplicate check and generate anyway -
+  // used when the shopkeeper has already been warned that the entries
+  // being billed look like they include a double-logged entry and
+  // confirmed they want to proceed. Omit/false on the first attempt.
+  confirmDuplicates?: boolean;
 }
 
 export interface ListUnbilledPaymentsRequest {

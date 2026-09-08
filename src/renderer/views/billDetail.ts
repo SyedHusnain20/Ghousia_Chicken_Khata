@@ -59,6 +59,14 @@ function receiptMarkup(bill: BillDetail): HTMLElement {
       ]),
       el('tbody', {}, itemRows),
     ]),
+    el('div', { class: 'receipt-totals' }, [
+      el('div', { class: 'receipt-total-row' }, [el('span', {}, ['This bill\u2019s purchases']), el('span', {}, [formatRs(bill.subtotal)])]),
+      el('div', { class: 'receipt-total-row' }, [el('span', {}, ['Previous due']), el('span', {}, [formatRs(bill.previous_due)])]),
+      el('div', { class: 'receipt-total-row receipt-total-grand' }, [
+        el('span', {}, ['Grand total']),
+        el('span', {}, [formatRs(bill.total_due_after_bill)]),
+      ]),
+    ]),
     bill.payments.length > 0
       ? el('div', { class: 'receipt-section' }, [
           el('div', { class: 'receipt-section-label' }, ['Payments']),
@@ -75,12 +83,6 @@ function receiptMarkup(bill: BillDetail): HTMLElement {
         ])
       : null,
     el('div', { class: 'receipt-totals' }, [
-      el('div', { class: 'receipt-total-row' }, [el('span', {}, ['This bill\u2019s purchases']), el('span', {}, [formatRs(bill.subtotal)])]),
-      el('div', { class: 'receipt-total-row' }, [el('span', {}, ['Previous due']), el('span', {}, [formatRs(bill.previous_due)])]),
-      el('div', { class: 'receipt-total-row receipt-total-grand' }, [
-        el('span', {}, ['Grand total']),
-        el('span', {}, [formatRs(bill.total_due_after_bill)]),
-      ]),
       paidTotal > 0
         ? el('div', { class: 'receipt-total-row' }, [el('span', {}, ['Total paid']), el('span', {}, [formatRs(paidTotal)])])
         : el('div', { class: 'receipt-total-row' }, [el('span', {}, ['Total paid']), el('span', {}, ['\u2014 (not paid yet)'])]),
@@ -92,6 +94,7 @@ function receiptMarkup(bill: BillDetail): HTMLElement {
     el('div', { class: 'receipt-footer' }, [
       el('div', {}, ['Powered by R&R Digital Solutions']),
       el('div', {}, ['Contact: 03126641281']),
+      el('div', {}, ['www.hasnainzainulabdin.vercel.app']),
     ]),
   ]);
 }

@@ -1,5 +1,5 @@
 import { el, mount } from '../dom';
-import { button, errorBanner, errorMessage, loadingState, pageHeader } from '../components';
+import { button, confirmDialog, errorBanner, errorMessage, loadingState, pageHeader } from '../components';
 import type { StorageInfo, SnapshotInfo } from '../../shared/ipc';
 
 function formatBytes(bytes: number): string {
@@ -150,13 +150,15 @@ export async function renderSettings(container: HTMLElement): Promise<void> {
     if (!choice) return; // dialog cancelled
 
     if (choice.hasExistingDatabase) {
-      const confirmed = window.confirm(
-        `A database already exists in this folder.\n\nOverwrite it with your current data? This cannot be undone.`
+      const confirmed = await confirmDialog(
+        `A database already exists in this folder.\n\nOverwrite it with your current data? This cannot be undone.`,
+        { confirmLabel: 'Overwrite', danger: true }
       );
       if (!confirmed) return;
     } else {
-      const confirmed = window.confirm(
-        `Move your data to:\n${choice.folderPath}\n\nThe app will restart to apply this change.`
+      const confirmed = await confirmDialog(
+        `Move your data to:\n${choice.folderPath}\n\nThe app will restart to apply this change.`,
+        { confirmLabel: 'Move & Restart' }
       );
       if (!confirmed) return;
     }
@@ -192,9 +194,10 @@ export async function renderSettings(container: HTMLElement): Promise<void> {
       return;
     }
 
-    const confirmed = window.confirm(
+    const confirmed = await confirmDialog(
       `This will REPLACE all your current data with the backup:\n${choice.filePath}\n\n` +
-        `Your current data will be saved first and can be restored back if needed. The app will restart to apply this.`
+        `Your current data will be saved first and can be restored back if needed. The app will restart to apply this.`,
+      { confirmLabel: 'Restore', danger: true }
     );
     if (!confirmed) return;
 

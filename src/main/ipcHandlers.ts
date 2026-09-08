@@ -112,7 +112,7 @@ export function registerIpcHandlers(db: Database.Database): void {
   });
 
   ipcMain.handle(IpcChannels.BILL_GENERATE, (_event, req: GenerateBillRequest) => {
-    return generateBill(db, req.partyType, req.partyId, req.entryIds, req.paymentIds);
+    return generateBill(db, req.partyType, req.partyId, req.entryIds, req.paymentIds, req.confirmDuplicates ?? false);
   });
 
   ipcMain.handle(IpcChannels.PAYMENT_LIST_UNBILLED, (_event, req: ListUnbilledPaymentsRequest) => {

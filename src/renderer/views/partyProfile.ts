@@ -1,6 +1,6 @@
 import { el, mount } from '../dom';
 import { formatDue, formatRs, formatDateTime, todayIso } from '../format';
-import { emptyState, errorBanner, errorMessage, loadingState } from '../components';
+import { confirmDialog, emptyState, errorBanner, errorMessage, loadingState } from '../components';
 import { navigate } from '../router';
 import type { BillListItem, Entry, Party, PartyType, Payment } from '../../main/types';
 
@@ -66,9 +66,10 @@ function deletePartyControls(party: Party, partyType: PartyType): HTMLElement {
 
     forceBtn.addEventListener('click', async () => {
       forceErrorSlot.replaceChildren();
-      const finalConfirm = window.confirm(
+      const finalConfirm = await confirmDialog(
         `This will PERMANENTLY delete ${party.name} and every purchase, sale, bill, and payment ever logged against them. ` +
-          `This cannot be undone and will change past Daily Ledger totals for any day they appeared in. Are you absolutely sure?`
+          `This cannot be undone and will change past Daily Ledger totals for any day they appeared in. Are you absolutely sure?`,
+        { confirmLabel: 'Delete Everything', danger: true }
       );
       if (!finalConfirm) return;
 
@@ -97,8 +98,9 @@ function deletePartyControls(party: Party, partyType: PartyType): HTMLElement {
   deleteBtn.addEventListener('click', async () => {
     errorSlot.replaceChildren();
     forceDeleteWrap.replaceChildren();
-    const confirmed = window.confirm(
-      `Delete ${party.name}? This can\u2019t be undone. This only works if they have no outstanding balance and no transaction history yet.`
+    const confirmed = await confirmDialog(
+      `Delete ${party.name}? This can\u2019t be undone. This only works if they have no outstanding balance and no transaction history yet.`,
+      { confirmLabel: 'Delete', danger: true }
     );
     if (!confirmed) return;
 
@@ -227,7 +229,7 @@ function addEntryForm(partyType: PartyType, partyId: number, onSaved: () => void
         const dupWarning = duplicateWarningMessage(err);
         if (dupWarning && !confirmDuplicate) {
           // Not a hard error - ask before saving a possible double entry.
-          if (window.confirm(dupWarning)) {
+          if (await confirmDialog(dupWarning, { confirmLabel: 'Add Anyway' })) {
             await trySave(true);
           }
           return;
@@ -436,8 +438,9 @@ function renderEntriesTable(
         const deleteBtn = el('button', { class: 'btn btn-danger btn-small', type: 'button' }, ['Delete']);
         const rowErrorSlot = el('div', { class: 'form-error-slot' });
         deleteBtn.addEventListener('click', async () => {
-          const confirmed = window.confirm(
-            `Delete this ${entry.item_name} entry (${formatRs(entry.line_total)})? This can\u2019t be undone.`
+          const confirmed = await confirmDialog(
+            `Delete this ${entry.item_name} entry (${formatRs(entry.line_total)})? This can\u2019t be undone.`,
+            { confirmLabel: 'Delete', danger: true }
           );
           if (!confirmed) return;
           (deleteBtn as HTMLButtonElement).disabled = true;
@@ -726,16 +729,31 @@ function generateBillPanel(
     const submitBtn = form.querySelector('button[type="submit"]') as HTMLButtonElement;
     submitBtn.disabled = true;
     try {
-      const bill = await window.khata.generateBill({
-        partyType,
-        partyId,
-        entryIds: selectedEntries.map((e) => e.id),
-        paymentIds: selectedPayments.map((p) => p.id),
-      });
-      navigate(`/bills/${partyType}/${bill.id}`);
-    } catch (err) {
-      errorSlot.replaceChildren(errorBanner(errorMessage(err)));
+      await trySave(false);
+    } finally {
       submitBtn.disabled = false;
+    }
+
+    async function trySave(confirmDuplicates: boolean): Promise<void> {
+      try {
+        const bill = await window.khata.generateBill({
+          partyType,
+          partyId,
+          entryIds: selectedEntries.map((e) => e.id),
+          paymentIds: selectedPayments.map((p) => p.id),
+          confirmDuplicates,
+        });
+        navigate(`/bills/${partyType}/${bill.id}`);
+      } catch (err) {
+        const dupWarning = duplicateWarningMessage(err);
+        if (dupWarning && !confirmDuplicates) {
+          if (await confirmDialog(dupWarning, { confirmLabel: 'Generate Anyway' })) {
+            await trySave(true);
+          }
+          return;
+        }
+        errorSlot.replaceChildren(errorBanner(errorMessage(err)));
+      }
     }
   });
 

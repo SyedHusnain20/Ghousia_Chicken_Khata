@@ -367,12 +367,36 @@ export function deleteEntry(db: Database.Database, partyType: PartyType, partyId
  * if paymentNow>0, reduces the due via recordPayment same as always. Runs
  * as a single transaction so nothing can end up half-updated.
  */
+/**
+ * Groups entries by item/weight/rate/calendar-date and returns only the
+ * groups with more than one entry - the fingerprint of an accidental
+ * double log (same delivery slip typed in twice). Used right before a bill
+ * is generated, since that's the moment everything being billed sits side
+ * by side and a duplicate is easiest to actually notice/catch - the last
+ * checkpoint before it's locked into an immutable, possibly-shared bill.
+ */
+function findDuplicateFingerprints(entries: Entry[]): Entry[][] {
+  const groups = new Map<string, Entry[]>();
+  for (const e of entries) {
+    const day = e.entry_date.split(' ')[0];
+    const key = `${e.item_name}|${e.weight_kg}|${e.rate_per_kg}|${day}`;
+    const list = groups.get(key);
+    if (list) {
+      list.push(e);
+    } else {
+      groups.set(key, [e]);
+    }
+  }
+  return [...groups.values()].filter((g) => g.length > 1);
+}
+
 export function generateBill(
   db: Database.Database,
   partyType: PartyType,
   partyId: number,
   entryIds?: number[],
-  paymentIds?: number[]
+  paymentIds?: number[],
+  confirmDuplicates: boolean = false
 ): Bill {
   const t = tables(partyType);
 
@@ -411,6 +435,18 @@ export function generateBill(
 
     if (pendingEntries.length === 0 && pendingPayments.length === 0) {
       throw new Error('No unbilled entries or payments selected to generate a bill from');
+    }
+
+    if (!confirmDuplicates) {
+      const dupGroups = findDuplicateFingerprints(pendingEntries);
+      if (dupGroups.length > 0) {
+        const details = dupGroups
+          .map((g) => `${g.length}x ${g[0].item_name} ${g[0].weight_kg}kg @ Rs.${g[0].rate_per_kg}/kg on ${g[0].entry_date.split(' ')[0]}`)
+          .join('; ');
+        throw new Error(
+          `DUPLICATE_ENTRY::This bill includes what look like duplicate entries - ${details}. Generate it anyway?`
+        );
+      }
     }
 
     const subtotal = floorMoney(pendingEntries.reduce((sum, e) => sum + e.line_total, 0));
