@@ -66,6 +66,13 @@ function receiptMarkup(bill: BillDetail): HTMLElement {
         el('span', {}, ['Grand total']),
         el('span', {}, [formatRs(bill.total_due_after_bill)]),
       ]),
+      paidTotal > 0
+        ? el('div', { class: 'receipt-total-row' }, [el('span', {}, ['Total paid']), el('span', {}, [formatRs(paidTotal)])])
+        : el('div', { class: 'receipt-total-row' }, [el('span', {}, ['Total paid']), el('span', {}, ['\u2014 (not paid yet)'])]),
+      el('div', { class: 'receipt-total-row receipt-total-remaining' }, [
+        el('span', {}, ['Remaining due']),
+        el('span', {}, [formatRs(bill.remaining_due)]),
+      ]),
     ]),
     bill.payments.length > 0
       ? el('div', { class: 'receipt-section' }, [
@@ -82,15 +89,6 @@ function receiptMarkup(bill: BillDetail): HTMLElement {
           ]),
         ])
       : null,
-    el('div', { class: 'receipt-totals' }, [
-      paidTotal > 0
-        ? el('div', { class: 'receipt-total-row' }, [el('span', {}, ['Total paid']), el('span', {}, [formatRs(paidTotal)])])
-        : el('div', { class: 'receipt-total-row' }, [el('span', {}, ['Total paid']), el('span', {}, ['\u2014 (not paid yet)'])]),
-      el('div', { class: 'receipt-total-row receipt-total-remaining' }, [
-        el('span', {}, ['Remaining due']),
-        el('span', {}, [formatRs(bill.remaining_due)]),
-      ]),
-    ]),
     el('div', { class: 'receipt-footer' }, [
       el('div', {}, ['Powered by R&R Digital Solutions']),
       el('div', {}, ['Contact: 03126641281']),
