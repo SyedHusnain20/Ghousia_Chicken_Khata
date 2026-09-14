@@ -157,7 +157,23 @@ export function registerIpcHandlers(db: Database.Database): void {
   });
 
   ipcMain.handle(IpcChannels.DAILY_LEDGER_UPDATE_FIELDS, (_event, req: UpdateDailyLedgerFieldsRequest) => {
-    return updateDailyLedgerFields(db, req.ledgerDate, req.cashCustomerIncome ?? 0, req.extraExpenses ?? 0);
+    const hasLiveChickenInput =
+      req.liveChickenWeightKg !== undefined || req.liveChickenRate !== undefined || req.liveChickenTotal !== undefined;
+    const hasChickenMeatInput =
+      req.chickenMeatWeightKg !== undefined || req.chickenMeatRate !== undefined || req.chickenMeatTotal !== undefined;
+    const hasLeverInput = req.leverWeightKg !== undefined || req.leverRate !== undefined || req.leverTotal !== undefined;
+
+    return updateDailyLedgerFields(db, req.ledgerDate, {
+      saleIncome: req.saleIncome,
+      extraExpenses: req.extraExpenses,
+      liveChicken: hasLiveChickenInput
+        ? { weightKg: req.liveChickenWeightKg, rate: req.liveChickenRate, totalAmount: req.liveChickenTotal }
+        : undefined,
+      chickenMeat: hasChickenMeatInput
+        ? { weightKg: req.chickenMeatWeightKg, rate: req.chickenMeatRate, totalAmount: req.chickenMeatTotal }
+        : undefined,
+      lever: hasLeverInput ? { weightKg: req.leverWeightKg, rate: req.leverRate, totalAmount: req.leverTotal } : undefined,
+    });
   });
 
   ipcMain.handle(IpcChannels.DAILY_LEDGER_LIST, (_event, req: ListDailyLedgersRequest) => {

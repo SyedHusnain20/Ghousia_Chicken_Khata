@@ -88,8 +88,20 @@ export interface EntryWithPartyName extends Entry {
 export interface DailyLedger {
   id: number;
   ledger_date: string; // 'YYYY-MM-DD'
-  cash_customer_income: number;
+  sale_income: number; // formerly cash_customer_income
   extra_expenses: number;
+  // Items Left: unsold stock for the day. weight/rate are entered per item;
+  // *_total is either typed directly or, when left blank, computed as
+  // floor(weight * rate) - see updateDailyLedgerFields.
+  live_chicken_weight_kg: number;
+  live_chicken_rate: number;
+  live_chicken_total: number;
+  chicken_meat_weight_kg: number;
+  chicken_meat_rate: number;
+  chicken_meat_total: number;
+  lever_weight_kg: number;
+  lever_rate: number;
+  lever_total: number;
   created_at: string;
   updated_at: string;
 }
@@ -98,12 +110,15 @@ export interface DailyLedger {
 // everything derived live from supplier_entries/customer_entries for that
 // date. supplier_purchases_total and khata_sales_total are NEVER stored -
 // they're always recomputed from the entries so there's no way for them to
-// drift out of sync with the Supplier/Customer modules.
+// drift out of sync with the Supplier/Customer modules. items_left_total is
+// also derived (sum of the three item totals) rather than stored, so it can
+// never drift from the individual item fields above.
 export interface DailyLedgerDetail extends DailyLedger {
   supplier_purchases: EntryWithPartyName[];
   khata_sales: EntryWithPartyName[];
   supplier_purchases_total: number;
   khata_sales_total: number;
+  items_left_total: number;
   total_income: number;
   total_expenses: number;
   profit_loss: number;

@@ -189,8 +189,21 @@ export interface GetDailyLedgerRequest {
 
 export interface UpdateDailyLedgerFieldsRequest {
   ledgerDate: string;
-  cashCustomerIncome?: number;
+  saleIncome?: number;
   extraExpenses?: number;
+  // Items Left - each item's fields are only applied when at least one of
+  // that item's own fields is present (see updateDailyLedgerFields); this
+  // lets the Sale/Extra Expenses form and the Items Left form save
+  // independently without clobbering each other's data.
+  liveChickenWeightKg?: number;
+  liveChickenRate?: number;
+  liveChickenTotal?: number; // omit/blank to auto-calculate as weight x rate
+  chickenMeatWeightKg?: number;
+  chickenMeatRate?: number;
+  chickenMeatTotal?: number;
+  leverWeightKg?: number;
+  leverRate?: number;
+  leverTotal?: number;
 }
 
 export interface ListDailyLedgersRequest {

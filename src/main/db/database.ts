@@ -79,4 +79,66 @@ function runMigrations(db: Database.Database): void {
       COMMIT;
     `);
   }
+
+  // daily_ledgers: old databases have "cash_customer_income" (REAL) and no
+  // Items Left columns at all. A rebuild is required here (not just
+  // RENAME/ADD COLUMN) because the money columns also need to go from REAL
+  // to INTEGER affinity - values are re-floored on the way across so no
+  // fractional rupee that may have slipped in gets carried forward.
+  const ledgerColumns = db.prepare('PRAGMA table_info(daily_ledgers)').all() as { name: string }[];
+  const hasOldCashColumn = ledgerColumns.some((c) => c.name === 'cash_customer_income');
+  const hasSaleColumn = ledgerColumns.some((c) => c.name === 'sale_income');
+
+  if (hasOldCashColumn && !hasSaleColumn) {
+    db.exec(`
+      BEGIN TRANSACTION;
+      CREATE TABLE daily_ledgers_new (
+        id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+        ledger_date            TEXT NOT NULL UNIQUE,
+        sale_income            INTEGER NOT NULL DEFAULT 0,
+        extra_expenses         INTEGER NOT NULL DEFAULT 0,
+        live_chicken_weight_kg REAL NOT NULL DEFAULT 0,
+        live_chicken_rate      REAL NOT NULL DEFAULT 0,
+        live_chicken_total     INTEGER NOT NULL DEFAULT 0,
+        chicken_meat_weight_kg REAL NOT NULL DEFAULT 0,
+        chicken_meat_rate      REAL NOT NULL DEFAULT 0,
+        chicken_meat_total     INTEGER NOT NULL DEFAULT 0,
+        lever_weight_kg        REAL NOT NULL DEFAULT 0,
+        lever_rate             REAL NOT NULL DEFAULT 0,
+        lever_total            INTEGER NOT NULL DEFAULT 0,
+        created_at             TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at             TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      INSERT INTO daily_ledgers_new (id, ledger_date, sale_income, extra_expenses, created_at, updated_at)
+        SELECT id, ledger_date, CAST(ROUND(cash_customer_income) AS INTEGER), CAST(ROUND(extra_expenses) AS INTEGER),
+               created_at, updated_at
+        FROM daily_ledgers;
+      DROP TABLE daily_ledgers;
+      ALTER TABLE daily_ledgers_new RENAME TO daily_ledgers;
+      COMMIT;
+    `);
+  } else {
+    // Table already has sale_income (either a brand-new DB from schema.sql,
+    // or one that went through the rebuild above in an earlier run) - just
+    // make sure every Items Left column exists, in case this database was
+    // last migrated by an earlier version of this app that didn't have them
+    // yet.
+    const currentColumns = db.prepare('PRAGMA table_info(daily_ledgers)').all() as { name: string }[];
+    const itemColumnDefs: [string, string][] = [
+      ['live_chicken_weight_kg', 'REAL NOT NULL DEFAULT 0'],
+      ['live_chicken_rate', 'REAL NOT NULL DEFAULT 0'],
+      ['live_chicken_total', 'INTEGER NOT NULL DEFAULT 0'],
+      ['chicken_meat_weight_kg', 'REAL NOT NULL DEFAULT 0'],
+      ['chicken_meat_rate', 'REAL NOT NULL DEFAULT 0'],
+      ['chicken_meat_total', 'INTEGER NOT NULL DEFAULT 0'],
+      ['lever_weight_kg', 'REAL NOT NULL DEFAULT 0'],
+      ['lever_rate', 'REAL NOT NULL DEFAULT 0'],
+      ['lever_total', 'INTEGER NOT NULL DEFAULT 0'],
+    ];
+    for (const [name, def] of itemColumnDefs) {
+      if (!currentColumns.some((c) => c.name === name)) {
+        db.exec(`ALTER TABLE daily_ledgers ADD COLUMN ${name} ${def}`);
+      }
+    }
+  }
 }

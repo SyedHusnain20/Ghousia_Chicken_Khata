@@ -66,14 +66,34 @@ addEntry(db, 'customer', bilalCust, 'Chicken', 20, 410, LEDGER_DATE); // 8,200
 addEntry(db, 'customer', hamzaCust, 'Chicken', 15, 420, LEDGER_DATE); // 6,300
 // Khata Sales Total = 18,500
 
-updateDailyLedgerFields(db, LEDGER_DATE, 35000, 3500); // Cash Customers, Extra Expenses
+updateDailyLedgerFields(db, LEDGER_DATE, { saleIncome: 35000, extraExpenses: 3500 }); // Sale, Extra Expenses
 
+const ledgerBeforeItems = getDailyLedger(db, LEDGER_DATE);
+assertEqual('Supplier purchases total', ledgerBeforeItems.supplier_purchases_total, 76820);
+assertEqual('Khata sales total', ledgerBeforeItems.khata_sales_total, 18500);
+assertEqual('Items left total (none entered yet)', ledgerBeforeItems.items_left_total, 0);
+assertEqual('Total income', ledgerBeforeItems.total_income, 53500);
+assertEqual('Total expenses', ledgerBeforeItems.total_expenses, 80320);
+assertEqual('Profit/Loss (negative = loss)', ledgerBeforeItems.profit_loss, -26820);
+
+console.log('\n--- Scenario C1b: Items Left included in Profit/Loss, saved independently of Sale/Expenses ---');
+// Items Left form is a separate save - it must not disturb the Sale/Extra
+// Expenses figures set above.
+updateDailyLedgerFields(db, LEDGER_DATE, {
+  liveChicken: { weightKg: 10, rate: 300 }, // total omitted -> auto = 3,000
+  chickenMeat: { weightKg: 5, rate: 600, totalAmount: 3200 }, // explicit override total
+  lever: { weightKg: 2, rate: 500 }, // total omitted -> auto = 1,000
+});
 const ledger = getDailyLedger(db, LEDGER_DATE);
-assertEqual('Supplier purchases total', ledger.supplier_purchases_total, 76820);
-assertEqual('Khata sales total', ledger.khata_sales_total, 18500);
-assertEqual('Total income', ledger.total_income, 53500);
-assertEqual('Total expenses', ledger.total_expenses, 80320);
-assertEqual('Profit/Loss (negative = loss)', ledger.profit_loss, -26820);
+assertEqual('Sale unchanged after Items Left save', ledger.sale_income, 35000);
+assertEqual('Extra Expenses unchanged after Items Left save', ledger.extra_expenses, 3500);
+assertEqual('Live Chicken auto total', ledger.live_chicken_total, 3000);
+assertEqual('Chicken Meat override total', ledger.chicken_meat_total, 3200);
+assertEqual('Lever auto total', ledger.lever_total, 1000);
+assertEqual('Items Left total', ledger.items_left_total, 7200);
+assertEqual('Total income now includes Items Left', ledger.total_income, 60700);
+assertEqual('Total expenses unaffected by Items Left', ledger.total_expenses, 80320);
+assertEqual('Profit/Loss reflects Items Left', ledger.profit_loss, -19620);
 
 console.log('\n--- Scenario C2: payments must NOT affect the Daily Ledger (rules 2 & 4) ---');
 // Ali's supplier due is now 26,600 from the purchase above; pay some of it off.
@@ -82,8 +102,8 @@ recordPayment(db, 'supplier', aliSupp, 10000, null, 'Partial payment, same day')
 recordPayment(db, 'customer', ahmedCust, 2000, null, 'Partial collection, same day');
 const ledgerAfterPayments = getDailyLedger(db, LEDGER_DATE);
 assertEqual('Expenses unchanged by supplier payment', ledgerAfterPayments.total_expenses, 80320);
-assertEqual('Income unchanged by customer payment', ledgerAfterPayments.total_income, 53500);
-assertEqual('Profit/Loss unchanged by payments', ledgerAfterPayments.profit_loss, -26820);
+assertEqual('Income unchanged by customer payment', ledgerAfterPayments.total_income, 60700);
+assertEqual('Profit/Loss unchanged by payments', ledgerAfterPayments.profit_loss, -19620);
 
 console.log('\n--- Scenario C3: duplicate ledger creation is rejected ---');
 try {

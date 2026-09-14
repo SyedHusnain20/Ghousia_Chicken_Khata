@@ -1,0 +1,818 @@
+diff --git a/src/main/db/database.ts b/src/main/db/database.ts
+index 2f67a0f..a9bd3cf 100644
+--- a/src/main/db/database.ts
++++ b/src/main/db/database.ts
+@@ -79,4 +79,66 @@ function runMigrations(db: Database.Database): void {
+       COMMIT;
+     `);
+   }
++
++  // daily_ledgers: old databases have "cash_customer_income" (REAL) and no
++  // Items Left columns at all. A rebuild is required here (not just
++  // RENAME/ADD COLUMN) because the money columns also need to go from REAL
++  // to INTEGER affinity - values are re-floored on the way across so no
++  // fractional rupee that may have slipped in gets carried forward.
++  const ledgerColumns = db.prepare('PRAGMA table_info(daily_ledgers)').all() as { name: string }[];
++  const hasOldCashColumn = ledgerColumns.some((c) => c.name === 'cash_customer_income');
++  const hasSaleColumn = ledgerColumns.some((c) => c.name === 'sale_income');
++
++  if (hasOldCashColumn && !hasSaleColumn) {
++    db.exec(`
++      BEGIN TRANSACTION;
++      CREATE TABLE daily_ledgers_new (
++        id                     INTEGER PRIMARY KEY AUTOINCREMENT,
++        ledger_date            TEXT NOT NULL UNIQUE,
++        sale_income            INTEGER NOT NULL DEFAULT 0,
++        extra_expenses         INTEGER NOT NULL DEFAULT 0,
++        live_chicken_weight_kg REAL NOT NULL DEFAULT 0,
++        live_chicken_rate      REAL NOT NULL DEFAULT 0,
++        live_chicken_total     INTEGER NOT NULL DEFAULT 0,
++        chicken_meat_weight_kg REAL NOT NULL DEFAULT 0,
++        chicken_meat_rate      REAL NOT NULL DEFAULT 0,
++        chicken_meat_total     INTEGER NOT NULL DEFAULT 0,
++        lever_weight_kg        REAL NOT NULL DEFAULT 0,
++        lever_rate             REAL NOT NULL DEFAULT 0,
++        lever_total            INTEGER NOT NULL DEFAULT 0,
++        created_at             TEXT NOT NULL DEFAULT (datetime('now')),
++        updated_at             TEXT NOT NULL DEFAULT (datetime('now'))
++      );
++      INSERT INTO daily_ledgers_new (id, ledger_date, sale_income, extra_expenses, created_at, updated_at)
++        SELECT id, ledger_date, CAST(ROUND(cash_customer_income) AS INTEGER), CAST(ROUND(extra_expenses) AS INTEGER),
++               created_at, updated_at
++        FROM daily_ledgers;
++      DROP TABLE daily_ledgers;
++      ALTER TABLE daily_ledgers_new RENAME TO daily_ledgers;
++      COMMIT;
++    `);
++  } else {
++    // Table already has sale_income (either a brand-new DB from schema.sql,
++    // or one that went through the rebuild above in an earlier run) - just
++    // make sure every Items Left column exists, in case this database was
++    // last migrated by an earlier version of this app that didn't have them
++    // yet.
++    const currentColumns = db.prepare('PRAGMA table_info(daily_ledgers)').all() as { name: string }[];
++    const itemColumnDefs: [string, string][] = [
++      ['live_chicken_weight_kg', 'REAL NOT NULL DEFAULT 0'],
++      ['live_chicken_rate', 'REAL NOT NULL DEFAULT 0'],
++      ['live_chicken_total', 'INTEGER NOT NULL DEFAULT 0'],
++      ['chicken_meat_weight_kg', 'REAL NOT NULL DEFAULT 0'],
++      ['chicken_meat_rate', 'REAL NOT NULL DEFAULT 0'],
++      ['chicken_meat_total', 'INTEGER NOT NULL DEFAULT 0'],
++      ['lever_weight_kg', 'REAL NOT NULL DEFAULT 0'],
++      ['lever_rate', 'REAL NOT NULL DEFAULT 0'],
++      ['lever_total', 'INTEGER NOT NULL DEFAULT 0'],
++    ];
++    for (const [name, def] of itemColumnDefs) {
++      if (!currentColumns.some((c) => c.name === name)) {
++        db.exec(`ALTER TABLE daily_ledgers ADD COLUMN ${name} ${def}`);
++      }
++    }
++  }
+ }
+diff --git a/src/main/db/schema.sql b/src/main/db/schema.sql
+index 6a4c9f8..ab4db59 100644
+--- a/src/main/db/schema.sql
++++ b/src/main/db/schema.sql
+@@ -123,18 +123,32 @@ CREATE INDEX IF NOT EXISTS idx_shopkeeper_entries_unbilled
+ 
+ -- Daily Ledger: one row per business date, created explicitly by the
+ -- shopkeeper (UNIQUE constraint makes accidental duplicates for the same
+--- date structurally impossible). Only holds the two genuinely manual
+--- fields - Cash Customers and Extra Expenses. Supplier purchases and Khata
+--- customer sales are NOT duplicated here; they're aggregated live from
+--- supplier_entries/customer_entries by date, so there is exactly one
+--- source of truth for every transaction.
++-- date structurally impossible). Holds the manual fields - Sale, Extra
++-- Expenses, and the Items Left breakdown (unsold Live Chicken / Chicken
++-- Meat / Lever, each weight + rate + an optional override total). Supplier
++-- purchases and Khata customer sales are NOT duplicated here; they're
++-- aggregated live from supplier_entries/customer_entries by date, so there
++-- is exactly one source of truth for every transaction. sale_income and
++-- extra_expenses are whole rupees (INTEGER) - this app never deals in
++-- paisas (see floorMoney). Each item's *_total is likewise a whole-rupee
++-- INTEGER: it's either typed in directly or, when left blank, computed as
++-- floor(weight_kg * rate) - same convention as line_total elsewhere.
+ CREATE TABLE IF NOT EXISTS daily_ledgers (
+-  id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+-  ledger_date          TEXT NOT NULL UNIQUE,   -- 'YYYY-MM-DD'
+-  cash_customer_income REAL NOT NULL DEFAULT 0,
+-  extra_expenses       REAL NOT NULL DEFAULT 0,
+-  created_at           TEXT NOT NULL DEFAULT (datetime('now')),
+-  updated_at           TEXT NOT NULL DEFAULT (datetime('now'))
++  id                     INTEGER PRIMARY KEY AUTOINCREMENT,
++  ledger_date            TEXT NOT NULL UNIQUE,   -- 'YYYY-MM-DD'
++  sale_income            INTEGER NOT NULL DEFAULT 0,
++  extra_expenses         INTEGER NOT NULL DEFAULT 0,
++  live_chicken_weight_kg REAL NOT NULL DEFAULT 0,
++  live_chicken_rate      REAL NOT NULL DEFAULT 0,
++  live_chicken_total     INTEGER NOT NULL DEFAULT 0,
++  chicken_meat_weight_kg REAL NOT NULL DEFAULT 0,
++  chicken_meat_rate      REAL NOT NULL DEFAULT 0,
++  chicken_meat_total     INTEGER NOT NULL DEFAULT 0,
++  lever_weight_kg        REAL NOT NULL DEFAULT 0,
++  lever_rate             REAL NOT NULL DEFAULT 0,
++  lever_total            INTEGER NOT NULL DEFAULT 0,
++  created_at             TEXT NOT NULL DEFAULT (datetime('now')),
++  updated_at             TEXT NOT NULL DEFAULT (datetime('now'))
+ );
+ 
+ -- Needed to aggregate supplier/customer entries by calendar date
+diff --git a/src/main/ipcHandlers.ts b/src/main/ipcHandlers.ts
+index 896a465..daf5ab2 100644
+--- a/src/main/ipcHandlers.ts
++++ b/src/main/ipcHandlers.ts
+@@ -157,7 +157,23 @@ export function registerIpcHandlers(db: Database.Database): void {
+   });
+ 
+   ipcMain.handle(IpcChannels.DAILY_LEDGER_UPDATE_FIELDS, (_event, req: UpdateDailyLedgerFieldsRequest) => {
+-    return updateDailyLedgerFields(db, req.ledgerDate, req.cashCustomerIncome ?? 0, req.extraExpenses ?? 0);
++    const hasLiveChickenInput =
++      req.liveChickenWeightKg !== undefined || req.liveChickenRate !== undefined || req.liveChickenTotal !== undefined;
++    const hasChickenMeatInput =
++      req.chickenMeatWeightKg !== undefined || req.chickenMeatRate !== undefined || req.chickenMeatTotal !== undefined;
++    const hasLeverInput = req.leverWeightKg !== undefined || req.leverRate !== undefined || req.leverTotal !== undefined;
++
++    return updateDailyLedgerFields(db, req.ledgerDate, {
++      saleIncome: req.saleIncome,
++      extraExpenses: req.extraExpenses,
++      liveChicken: hasLiveChickenInput
++        ? { weightKg: req.liveChickenWeightKg, rate: req.liveChickenRate, totalAmount: req.liveChickenTotal }
++        : undefined,
++      chickenMeat: hasChickenMeatInput
++        ? { weightKg: req.chickenMeatWeightKg, rate: req.chickenMeatRate, totalAmount: req.chickenMeatTotal }
++        : undefined,
++      lever: hasLeverInput ? { weightKg: req.leverWeightKg, rate: req.leverRate, totalAmount: req.leverTotal } : undefined,
++    });
+   });
+ 
+   ipcMain.handle(IpcChannels.DAILY_LEDGER_LIST, (_event, req: ListDailyLedgersRequest) => {
+diff --git a/src/main/services/dailyLedgerService.ts b/src/main/services/dailyLedgerService.ts
+index e081699..efdb658 100644
+--- a/src/main/services/dailyLedgerService.ts
++++ b/src/main/services/dailyLedgerService.ts
+@@ -78,11 +78,21 @@ function getKhataSalesForDate(db: Database.Database, date: string): EntryWithPar
+     .all(date) as EntryWithPartyName[];
+ }
+ 
++/**
++ * Sum of the three Items Left totals - unsold Live Chicken, Chicken Meat,
++ * and Lever. Derived from the stored per-item totals rather than stored
++ * itself, so it can never drift out of sync with them.
++ */
++function itemsLeftTotal(ledger: DailyLedger): number {
++  return floorMoney(ledger.live_chicken_total + ledger.chicken_meat_total + ledger.lever_total);
++}
++
+ /**
+  * The full Daily Ledger view for one date. Throws if no ledger has been
+  * created for that date yet (see createDailyLedger). Every total here is
+- * computed fresh from supplier_entries/customer_entries - nothing about
+- * supplier or Khata activity is read from or written to daily_ledgers.
++ * computed fresh from supplier_entries/customer_entries (or, for Items
++ * Left, from the ledger's own stored item fields) - nothing about supplier
++ * or Khata activity is read from or written to daily_ledgers.
+  */
+ export function getDailyLedger(db: Database.Database, ledgerDate: string): DailyLedgerDetail {
+   assertValidDate(ledgerDate);
+@@ -99,8 +109,10 @@ export function getDailyLedger(db: Database.Database, ledgerDate: string): Daily
+ 
+   const supplierPurchasesTotal = floorMoney(supplierPurchases.reduce((sum, e) => sum + e.line_total, 0));
+   const khataSalesTotal = floorMoney(khataSales.reduce((sum, e) => sum + e.line_total, 0));
++  const itemsLeft = itemsLeftTotal(ledger);
+ 
+-  const totalIncome = floorMoney(khataSalesTotal + ledger.cash_customer_income);
++  // Profit/Loss = (Khata sales + Sale + Items Left) - (Extra Expenses + Supplier Purchases)
++  const totalIncome = floorMoney(khataSalesTotal + ledger.sale_income + itemsLeft);
+   const totalExpenses = floorMoney(supplierPurchasesTotal + ledger.extra_expenses);
+   const profitLoss = floorMoney(totalIncome - totalExpenses);
+ 
+@@ -110,33 +122,84 @@ export function getDailyLedger(db: Database.Database, ledgerDate: string): Daily
+     khata_sales: khataSales,
+     supplier_purchases_total: supplierPurchasesTotal,
+     khata_sales_total: khataSalesTotal,
++    items_left_total: itemsLeft,
+     total_income: totalIncome,
+     total_expenses: totalExpenses,
+     profit_loss: profitLoss,
+   };
+ }
+ 
++/** One Items Left row's editable input - weight and rate, plus an optional override total. */
++export interface DailyLedgerItemInput {
++  weightKg?: number;
++  rate?: number;
++  totalAmount?: number; // omit/blank to auto-calculate as floor(weightKg * rate)
++}
++
++export interface UpdateDailyLedgerFieldsInput {
++  saleIncome?: number;
++  extraExpenses?: number;
++  liveChicken?: DailyLedgerItemInput;
++  chickenMeat?: DailyLedgerItemInput;
++  lever?: DailyLedgerItemInput;
++}
++
++function validateNonNegative(value: number, label: string): void {
++  if (!Number.isFinite(value) || value < 0) {
++    throw new Error(`${label} must be zero or a positive number`);
++  }
++}
++
+ /**
+- * Updates the two manual fields - Cash Customers Total and Extra Expenses.
+- * Each behaves as one single number (spec sections 8 & 12): no breakdown,
+- * no sub-records. An empty/omitted field is treated as Rs. 0, not
+- * required input (spec section 28).
++ * Resolves one Items Left row against its previously stored values. Only
++ * touches this item at all if the caller actually supplied something for
++ * it (see updateDailyLedgerFields) - otherwise the item's stored weight/
++ * rate/total pass straight through unchanged. When touched, a missing
++ * weight or rate within that item defaults to 0 (mirrors the "blank = 0"
++ * rule already used for Extra Expenses/Sale); a missing total is computed
++ * as floor(weight * rate) rather than defaulted to 0, since the total is
++ * explicitly optional (spec: "total amount (optional)").
++ */
++function resolveItem(
++  input: DailyLedgerItemInput | undefined,
++  existingWeight: number,
++  existingRate: number,
++  existingTotal: number,
++  label: string
++): { weightKg: number; rate: number; total: number } {
++  if (!input) {
++    return { weightKg: existingWeight, rate: existingRate, total: existingTotal };
++  }
++  const weightKg = input.weightKg ?? 0;
++  const rate = input.rate ?? 0;
++  validateNonNegative(weightKg, `${label} weight`);
++  validateNonNegative(rate, `${label} rate`);
++  let total: number;
++  if (input.totalAmount !== undefined) {
++    validateNonNegative(input.totalAmount, `${label} total amount`);
++    total = floorMoney(input.totalAmount);
++  } else {
++    total = floorMoney(weightKg * rate);
++  }
++  return { weightKg, rate, total };
++}
++
++/**
++ * Updates the manual fields: Sale, Extra Expenses, and the Items Left
++ * breakdown (Live Chicken / Chicken Meat / Lever). These are saved from two
++ * independent forms in the UI, so each group here is only touched when the
++ * caller actually supplies something for it - an omitted group keeps its
++ * previously stored values rather than being reset to 0, and an omitted
++ * field *within* a supplied group defaults to 0 (spec section 28, extended
++ * to Items Left).
+  */
+ export function updateDailyLedgerFields(
+   db: Database.Database,
+   ledgerDate: string,
+-  cashCustomerIncome: number = 0,
+-  extraExpenses: number = 0
++  input: UpdateDailyLedgerFieldsInput = {}
+ ): DailyLedger {
+   assertValidDate(ledgerDate);
+ 
+-  if (!Number.isFinite(cashCustomerIncome) || cashCustomerIncome < 0) {
+-    throw new Error('Cash Customers Total must be zero or a positive number');
+-  }
+-  if (!Number.isFinite(extraExpenses) || extraExpenses < 0) {
+-    throw new Error('Extra Expenses must be zero or a positive number');
+-  }
+-
+   const existing = db
+     .prepare('SELECT * FROM daily_ledgers WHERE ledger_date = ?')
+     .get(ledgerDate) as DailyLedger | undefined;
+@@ -144,12 +207,51 @@ export function updateDailyLedgerFields(
+     throw new Error(`No Daily Ledger exists for ${ledgerDate} yet - create it first`);
+   }
+ 
++  const saleIncome = input.saleIncome !== undefined ? input.saleIncome : existing.sale_income;
++  const extraExpenses = input.extraExpenses !== undefined ? input.extraExpenses : existing.extra_expenses;
++  validateNonNegative(saleIncome, 'Sale');
++  validateNonNegative(extraExpenses, 'Extra Expenses');
++
++  const liveChicken = resolveItem(
++    input.liveChicken,
++    existing.live_chicken_weight_kg,
++    existing.live_chicken_rate,
++    existing.live_chicken_total,
++    'Live Chicken'
++  );
++  const chickenMeat = resolveItem(
++    input.chickenMeat,
++    existing.chicken_meat_weight_kg,
++    existing.chicken_meat_rate,
++    existing.chicken_meat_total,
++    'Chicken Meat'
++  );
++  const lever = resolveItem(input.lever, existing.lever_weight_kg, existing.lever_rate, existing.lever_total, 'Lever');
++
+   const updatedAt = `${pakistanNow().date} ${pakistanNow().time}`;
+   db.prepare(
+     `UPDATE daily_ledgers
+-     SET cash_customer_income = ?, extra_expenses = ?, updated_at = ?
++     SET sale_income = ?, extra_expenses = ?,
++         live_chicken_weight_kg = ?, live_chicken_rate = ?, live_chicken_total = ?,
++         chicken_meat_weight_kg = ?, chicken_meat_rate = ?, chicken_meat_total = ?,
++         lever_weight_kg = ?, lever_rate = ?, lever_total = ?,
++         updated_at = ?
+      WHERE ledger_date = ?`
+-  ).run(floorMoney(cashCustomerIncome), floorMoney(extraExpenses), updatedAt, ledgerDate);
++  ).run(
++    floorMoney(saleIncome),
++    floorMoney(extraExpenses),
++    liveChicken.weightKg,
++    liveChicken.rate,
++    liveChicken.total,
++    chickenMeat.weightKg,
++    chickenMeat.rate,
++    chickenMeat.total,
++    lever.weightKg,
++    lever.rate,
++    lever.total,
++    updatedAt,
++    ledgerDate
++  );
+ 
+   return db.prepare('SELECT * FROM daily_ledgers WHERE ledger_date = ?').get(ledgerDate) as DailyLedger;
+ }
+@@ -203,7 +305,7 @@ export function listDailyLedgers(
+           .get(ledger.ledger_date) as { total: number }
+       ).total
+     );
+-    const totalIncome = floorMoney(khataTotal + ledger.cash_customer_income);
++    const totalIncome = floorMoney(khataTotal + ledger.sale_income + itemsLeftTotal(ledger));
+     const totalExpenses = floorMoney(supplierTotal + ledger.extra_expenses);
+     return {
+       ledger_date: ledger.ledger_date,
+@@ -216,8 +318,8 @@ export function listDailyLedgers(
+ 
+ /**
+  * Monthly totals, summed only across dates that actually have a Daily
+- * Ledger created - a date with no ledger has no recorded Cash Customers /
+- * Extra Expenses figure, so including it would silently understate
++ * Ledger created - a date with no ledger has no recorded Sale / Extra
++ * Expenses / Items Left figure, so including it would silently understate
+  * expenses and overstate profit for that day. month is 1-12.
+  */
+ export function getMonthlySummary(
+diff --git a/src/main/types/index.ts b/src/main/types/index.ts
+index ab38661..e08242d 100644
+--- a/src/main/types/index.ts
++++ b/src/main/types/index.ts
+@@ -88,8 +88,20 @@ export interface EntryWithPartyName extends Entry {
+ export interface DailyLedger {
+   id: number;
+   ledger_date: string; // 'YYYY-MM-DD'
+-  cash_customer_income: number;
++  sale_income: number; // formerly cash_customer_income
+   extra_expenses: number;
++  // Items Left: unsold stock for the day. weight/rate are entered per item;
++  // *_total is either typed directly or, when left blank, computed as
++  // floor(weight * rate) - see updateDailyLedgerFields.
++  live_chicken_weight_kg: number;
++  live_chicken_rate: number;
++  live_chicken_total: number;
++  chicken_meat_weight_kg: number;
++  chicken_meat_rate: number;
++  chicken_meat_total: number;
++  lever_weight_kg: number;
++  lever_rate: number;
++  lever_total: number;
+   created_at: string;
+   updated_at: string;
+ }
+@@ -98,12 +110,15 @@ export interface DailyLedger {
+ // everything derived live from supplier_entries/customer_entries for that
+ // date. supplier_purchases_total and khata_sales_total are NEVER stored -
+ // they're always recomputed from the entries so there's no way for them to
+-// drift out of sync with the Supplier/Customer modules.
++// drift out of sync with the Supplier/Customer modules. items_left_total is
++// also derived (sum of the three item totals) rather than stored, so it can
++// never drift from the individual item fields above.
+ export interface DailyLedgerDetail extends DailyLedger {
+   supplier_purchases: EntryWithPartyName[];
+   khata_sales: EntryWithPartyName[];
+   supplier_purchases_total: number;
+   khata_sales_total: number;
++  items_left_total: number;
+   total_income: number;
+   total_expenses: number;
+   profit_loss: number;
+diff --git a/src/renderer/style.css b/src/renderer/style.css
+index 57f4279..0956d5d 100644
+--- a/src/renderer/style.css
++++ b/src/renderer/style.css
+@@ -554,6 +554,15 @@ input:focus, select:focus, button:focus-visible, a:focus-visible, .clickable-row
+   margin: 10px 0 0;
+ }
+ 
++.items-left-row {
++  margin-bottom: 18px;
++}
++
++.items-left-row-title {
++  font-size: 15px;
++  margin: 0 0 8px;
++}
++
+ .total-preview-row {
+   margin-top: 12px;
+   font-size: 14px;
+diff --git a/src/renderer/views/dailyLedger.ts b/src/renderer/views/dailyLedger.ts
+index c5198da..3de4e56 100644
+--- a/src/renderer/views/dailyLedger.ts
++++ b/src/renderer/views/dailyLedger.ts
+@@ -3,6 +3,7 @@ import { formatDate, formatProfitLoss, formatRs, todayIso } from '../format';
+ import { emptyState, errorBanner, errorMessage, loadingState, pageHeader } from '../components';
+ import { navigate } from '../router';
+ import type { DailyLedgerDetail, EntryWithPartyName } from '../../main/types';
++import type { UpdateDailyLedgerFieldsRequest } from '../../shared/ipc';
+ 
+ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+ 
+@@ -163,11 +164,13 @@ function totalLine(label: string, amount: number, strong = false): HTMLElement {
+ 
+ // The two manually-entered, single-number fields (spec sections 3 & 6).
+ // Both default to 0 and reject negative values before ever reaching the
+-// backend, which enforces the same rule again.
+-function manualFieldsForm(
++// backend, which enforces the same rule again. Only saleIncome/extraExpenses
++// are sent - the Items Left fields are left out of the request entirely so
++// the backend keeps whatever is already stored for them.
++function saleAndExpensesForm(
+   ledgerDate: string,
+   extraExpenses: number,
+-  cashCustomerIncome: number,
++  saleIncome: number,
+   onSaved: () => void
+ ): HTMLElement {
+   const extraInput = el('input', {
+@@ -176,22 +179,22 @@ function manualFieldsForm(
+     min: '0',
+     value: String(extraExpenses),
+   }) as HTMLInputElement;
+-  const cashInput = el('input', {
++  const saleInput = el('input', {
+     type: 'number',
+     step: '0.01',
+     min: '0',
+-    value: String(cashCustomerIncome),
++    value: String(saleIncome),
+   }) as HTMLInputElement;
+   const errorSlot = el('div', { class: 'form-error-slot' });
+ 
+   const form = el('form', { class: 'inline-form' }, [
+     el('div', { class: 'form-grid form-grid-tight' }, [
+       el('label', {}, ['Extra Expenses (Rs.)', extraInput]),
+-      el('label', {}, ['Cash Customers Total (Rs.)', cashInput]),
++      el('label', {}, ['Sale (Rs.)', saleInput]),
+     ]),
+     el('p', { class: 'field-hint' }, [
+       'One combined total each \u2014 wages, ice, transport, electricity, etc. under Extra Expenses; all walk-in ' +
+-        'cash sales for the day under Cash Customers. Leave a field empty for Rs. 0.',
++        'cash sales for the day under Sale. Leave a field empty for Rs. 0.',
+     ]),
+     errorSlot,
+     el('div', { class: 'form-actions' }, [
+@@ -204,13 +207,13 @@ function manualFieldsForm(
+     errorSlot.replaceChildren();
+ 
+     const extra = extraInput.value.trim() === '' ? 0 : Number(extraInput.value);
+-    const cash = cashInput.value.trim() === '' ? 0 : Number(cashInput.value);
++    const sale = saleInput.value.trim() === '' ? 0 : Number(saleInput.value);
+     if (!Number.isFinite(extra) || extra < 0) {
+       errorSlot.append(errorBanner('Extra Expenses must be zero or a positive number.'));
+       return;
+     }
+-    if (!Number.isFinite(cash) || cash < 0) {
+-      errorSlot.append(errorBanner('Cash Customers Total must be zero or a positive number.'));
++    if (!Number.isFinite(sale) || sale < 0) {
++      errorSlot.append(errorBanner('Sale must be zero or a positive number.'));
+       return;
+     }
+ 
+@@ -220,7 +223,7 @@ function manualFieldsForm(
+       await window.khata.updateDailyLedgerFields({
+         ledgerDate,
+         extraExpenses: extra,
+-        cashCustomerIncome: cash,
++        saleIncome: sale,
+       });
+       onSaved();
+     } catch (err) {
+@@ -233,6 +236,178 @@ function manualFieldsForm(
+   return form;
+ }
+ 
++interface ItemLeftRowDef {
++  key: 'liveChicken' | 'chickenMeat' | 'lever';
++  label: string;
++  weightKg: number;
++  rate: number;
++  total: number;
++}
++
++// Displays the three Items Left rows (unsold Live Chicken / Chicken Meat /
++// Lever) the same way Supplier Purchases and Khata Sales are shown, so the
++// page reads consistently even though these rows come from the ledger's
++// own stored fields rather than a separate entries table.
++function itemsLeftTable(rows: ItemLeftRowDef[], total: number): HTMLElement {
++  return el('table', { class: 'data-table ledger-entries-table' }, [
++    el('thead', {}, [
++      el('tr', {}, [
++        el('th', {}, ['Item']),
++        el('th', { class: 'th-right' }, ['KG']),
++        el('th', { class: 'th-right' }, ['Rate']),
++        el('th', { class: 'th-right' }, ['Total']),
++      ]),
++    ]),
++    el(
++      'tbody',
++      {},
++      rows.map((r) =>
++        el('tr', {}, [
++          el('td', { class: 'cell-name' }, [r.label]),
++          el('td', { class: 'cell-number' }, [String(r.weightKg)]),
++          el('td', { class: 'cell-number' }, [formatRs(r.rate)]),
++          el('td', { class: 'cell-number cell-strong' }, [formatRs(r.total)]),
++        ])
++      )
++    ),
++    el('tfoot', {}, [
++      el('tr', {}, [
++        el('td', { colspan: '3' }, ['Items Left Total']),
++        el('td', { class: 'cell-number cell-strong' }, [formatRs(total)]),
++      ]),
++    ]),
++  ]);
++}
++
++// The separate "Items Left" form (unsold stock at end of day): Live
++// Chicken, Chicken Meat, and Lever, each with weight, rate, and an
++// optional override total (left blank = auto-calculated as weight x
++// rate). Submits independently from saleAndExpensesForm - only these nine
++// fields are sent, so Sale/Extra Expenses are left untouched.
++function itemsLeftForm(ledgerDate: string, rows: ItemLeftRowDef[], onSaved: () => void): HTMLElement {
++  const errorSlot = el('div', { class: 'form-error-slot' });
++  const previewSlot = el('div', {});
++  const inputsByKey = new Map<
++    ItemLeftRowDef['key'],
++    { weightInput: HTMLInputElement; rateInput: HTMLInputElement; totalInput: HTMLInputElement }
++  >();
++
++  function refreshPreview(): void {
++    let grandTotal = 0;
++    for (const row of rows) {
++      const { weightInput, rateInput, totalInput } = inputsByKey.get(row.key)!;
++      const weight = weightInput.value.trim() === '' ? 0 : Number(weightInput.value);
++      const rate = rateInput.value.trim() === '' ? 0 : Number(rateInput.value);
++      const typedTotal = totalInput.value.trim() === '' ? null : Number(totalInput.value);
++      const total = typedTotal !== null && Number.isFinite(typedTotal) ? typedTotal : floorMoney(weight * rate);
++      grandTotal += Number.isFinite(total) ? total : 0;
++    }
++    previewSlot.replaceChildren(totalLine('Items Left Total', floorMoney(grandTotal), true));
++  }
++
++  const itemBlocks = rows.map((row) => {
++    const weightInput = el('input', {
++      type: 'number',
++      step: '0.01',
++      min: '0',
++      value: String(row.weightKg),
++    }) as HTMLInputElement;
++    const rateInput = el('input', {
++      type: 'number',
++      step: '0.01',
++      min: '0',
++      value: String(row.rate),
++    }) as HTMLInputElement;
++    const totalInput = el('input', {
++      type: 'number',
++      step: '0.01',
++      min: '0',
++      placeholder: 'Auto (weight \u00d7 rate)',
++    }) as HTMLInputElement;
++
++    inputsByKey.set(row.key, { weightInput, rateInput, totalInput });
++    [weightInput, rateInput, totalInput].forEach((input) => input.addEventListener('input', refreshPreview));
++
++    return el('div', { class: 'items-left-row' }, [
++      el('h3', { class: 'items-left-row-title' }, [row.label]),
++      el('div', { class: 'form-grid form-grid-tight' }, [
++        el('label', {}, ['Weight (KG)', weightInput]),
++        el('label', {}, ['Rate (Rs./KG)', rateInput]),
++        el('label', {}, ['Total Amount (Rs., optional)', totalInput]),
++      ]),
++    ]);
++  });
++
++  const form = el('form', { class: 'inline-form' }, [
++    ...itemBlocks,
++    el('p', { class: 'field-hint' }, [
++      'Total Amount is optional per item \u2014 leave it blank to auto-calculate as Weight \u00d7 Rate, or type a ' +
++        'value to override it.',
++    ]),
++    previewSlot,
++    errorSlot,
++    el('div', { class: 'form-actions' }, [
++      el('button', { class: 'btn btn-primary', type: 'submit' }, ['Save Items Left']),
++    ]),
++  ]);
++
++  refreshPreview();
++
++  form.addEventListener('submit', async (e) => {
++    e.preventDefault();
++    errorSlot.replaceChildren();
++
++    const payload: UpdateDailyLedgerFieldsRequest = { ledgerDate };
++    for (const row of rows) {
++      const { weightInput, rateInput, totalInput } = inputsByKey.get(row.key)!;
++      const weight = weightInput.value.trim() === '' ? 0 : Number(weightInput.value);
++      const rate = rateInput.value.trim() === '' ? 0 : Number(rateInput.value);
++      if (!Number.isFinite(weight) || weight < 0) {
++        errorSlot.append(errorBanner(`${row.label} weight must be zero or a positive number.`));
++        return;
++      }
++      if (!Number.isFinite(rate) || rate < 0) {
++        errorSlot.append(errorBanner(`${row.label} rate must be zero or a positive number.`));
++        return;
++      }
++      let typedTotal: number | undefined;
++      if (totalInput.value.trim() !== '') {
++        typedTotal = Number(totalInput.value);
++        if (!Number.isFinite(typedTotal) || typedTotal < 0) {
++          errorSlot.append(errorBanner(`${row.label} total amount must be zero or a positive number.`));
++          return;
++        }
++      }
++      if (row.key === 'liveChicken') {
++        payload.liveChickenWeightKg = weight;
++        payload.liveChickenRate = rate;
++        payload.liveChickenTotal = typedTotal;
++      } else if (row.key === 'chickenMeat') {
++        payload.chickenMeatWeightKg = weight;
++        payload.chickenMeatRate = rate;
++        payload.chickenMeatTotal = typedTotal;
++      } else {
++        payload.leverWeightKg = weight;
++        payload.leverRate = rate;
++        payload.leverTotal = typedTotal;
++      }
++    }
++
++    const submitBtn = form.querySelector('button[type="submit"]') as HTMLButtonElement;
++    submitBtn.disabled = true;
++    try {
++      await window.khata.updateDailyLedgerFields(payload);
++      onSaved();
++    } catch (err) {
++      errorSlot.replaceChildren(errorBanner(errorMessage(err)));
++    } finally {
++      submitBtn.disabled = false;
++    }
++  });
++
++  return form;
++}
++
+ // The headline Profit/Loss card. Reuses the .due-hero styling (and its
+ // due/credit/clear color language) already established for party balances,
+ // since the semantics line up: profit = credit green, loss = due red.
+@@ -309,6 +484,24 @@ export async function renderDailyLedger(ledgerDate: string, container: HTMLEleme
+       return;
+     }
+ 
++    const itemRows: ItemLeftRowDef[] = [
++      {
++        key: 'liveChicken',
++        label: 'Live Chicken',
++        weightKg: detail.live_chicken_weight_kg,
++        rate: detail.live_chicken_rate,
++        total: detail.live_chicken_total,
++      },
++      {
++        key: 'chickenMeat',
++        label: 'Chicken Meat',
++        weightKg: detail.chicken_meat_weight_kg,
++        rate: detail.chicken_meat_rate,
++        total: detail.chicken_meat_total,
++      },
++      { key: 'lever', label: 'Lever', weightKg: detail.lever_weight_kg, rate: detail.lever_rate, total: detail.lever_total },
++    ];
++
+     mount(
+       bodyWrap,
+       resultHero(detail.total_income, detail.total_expenses),
+@@ -333,14 +526,22 @@ export async function renderDailyLedger(ledgerDate: string, container: HTMLEleme
+             'Khata Sales Total',
+             'No Khata customer sales recorded for this date.'
+           ),
+-          totalLine('Cash Customers', detail.cash_customer_income),
++          totalLine('Sale', detail.sale_income),
++          totalLine('Items Left', detail.items_left_total),
+           el('hr', { class: 'ledger-total-rule' }),
+           totalLine('Total Income', detail.total_income, true),
+         ]),
+       ]),
+       el('section', { class: 'panel' }, [
+-        el('h2', {}, ['Extra Expenses & Cash Customers']),
+-        manualFieldsForm(ledgerDate, detail.extra_expenses, detail.cash_customer_income, load),
++        el('h2', {}, ['Extra Expenses & Sale']),
++        saleAndExpensesForm(ledgerDate, detail.extra_expenses, detail.sale_income, load),
++      ]),
++      el('section', { class: 'panel' }, [
++        el('h2', {}, ['Items Left']),
++        el('p', { class: 'field-hint' }, ['Unsold stock at the end of the day \u2014 Live Chicken, Chicken Meat, and Lever.']),
++        itemsLeftTable(itemRows, detail.items_left_total),
++        el('hr', { class: 'ledger-total-rule' }),
++        itemsLeftForm(ledgerDate, itemRows, load),
+       ])
+     );
+   }
+diff --git a/src/shared/ipc.ts b/src/shared/ipc.ts
+index 3444d17..3b0504a 100644
+--- a/src/shared/ipc.ts
++++ b/src/shared/ipc.ts
+@@ -189,8 +189,21 @@ export interface GetDailyLedgerRequest {
+ 
+ export interface UpdateDailyLedgerFieldsRequest {
+   ledgerDate: string;
+-  cashCustomerIncome?: number;
++  saleIncome?: number;
+   extraExpenses?: number;
++  // Items Left - each item's fields are only applied when at least one of
++  // that item's own fields is present (see updateDailyLedgerFields); this
++  // lets the Sale/Extra Expenses form and the Items Left form save
++  // independently without clobbering each other's data.
++  liveChickenWeightKg?: number;
++  liveChickenRate?: number;
++  liveChickenTotal?: number; // omit/blank to auto-calculate as weight x rate
++  chickenMeatWeightKg?: number;
++  chickenMeatRate?: number;
++  chickenMeatTotal?: number;
++  leverWeightKg?: number;
++  leverRate?: number;
++  leverTotal?: number;
+ }
+ 
+ export interface ListDailyLedgersRequest {
+diff --git a/test/scenario.ts b/test/scenario.ts
+index 025cfca..9cc23ef 100644
+--- a/test/scenario.ts
++++ b/test/scenario.ts
+@@ -66,14 +66,34 @@ addEntry(db, 'customer', bilalCust, 'Chicken', 20, 410, LEDGER_DATE); // 8,200
+ addEntry(db, 'customer', hamzaCust, 'Chicken', 15, 420, LEDGER_DATE); // 6,300
+ // Khata Sales Total = 18,500
+ 
+-updateDailyLedgerFields(db, LEDGER_DATE, 35000, 3500); // Cash Customers, Extra Expenses
++updateDailyLedgerFields(db, LEDGER_DATE, { saleIncome: 35000, extraExpenses: 3500 }); // Sale, Extra Expenses
+ 
++const ledgerBeforeItems = getDailyLedger(db, LEDGER_DATE);
++assertEqual('Supplier purchases total', ledgerBeforeItems.supplier_purchases_total, 76820);
++assertEqual('Khata sales total', ledgerBeforeItems.khata_sales_total, 18500);
++assertEqual('Items left total (none entered yet)', ledgerBeforeItems.items_left_total, 0);
++assertEqual('Total income', ledgerBeforeItems.total_income, 53500);
++assertEqual('Total expenses', ledgerBeforeItems.total_expenses, 80320);
++assertEqual('Profit/Loss (negative = loss)', ledgerBeforeItems.profit_loss, -26820);
++
++console.log('\n--- Scenario C1b: Items Left included in Profit/Loss, saved independently of Sale/Expenses ---');
++// Items Left form is a separate save - it must not disturb the Sale/Extra
++// Expenses figures set above.
++updateDailyLedgerFields(db, LEDGER_DATE, {
++  liveChicken: { weightKg: 10, rate: 300 }, // total omitted -> auto = 3,000
++  chickenMeat: { weightKg: 5, rate: 600, totalAmount: 3200 }, // explicit override total
++  lever: { weightKg: 2, rate: 500 }, // total omitted -> auto = 1,000
++});
+ const ledger = getDailyLedger(db, LEDGER_DATE);
+-assertEqual('Supplier purchases total', ledger.supplier_purchases_total, 76820);
+-assertEqual('Khata sales total', ledger.khata_sales_total, 18500);
+-assertEqual('Total income', ledger.total_income, 53500);
+-assertEqual('Total expenses', ledger.total_expenses, 80320);
+-assertEqual('Profit/Loss (negative = loss)', ledger.profit_loss, -26820);
++assertEqual('Sale unchanged after Items Left save', ledger.sale_income, 35000);
++assertEqual('Extra Expenses unchanged after Items Left save', ledger.extra_expenses, 3500);
++assertEqual('Live Chicken auto total', ledger.live_chicken_total, 3000);
++assertEqual('Chicken Meat override total', ledger.chicken_meat_total, 3200);
++assertEqual('Lever auto total', ledger.lever_total, 1000);
++assertEqual('Items Left total', ledger.items_left_total, 7200);
++assertEqual('Total income now includes Items Left', ledger.total_income, 60700);
++assertEqual('Total expenses unaffected by Items Left', ledger.total_expenses, 80320);
++assertEqual('Profit/Loss reflects Items Left', ledger.profit_loss, -19620);
+ 
+ console.log('\n--- Scenario C2: payments must NOT affect the Daily Ledger (rules 2 & 4) ---');
+ // Ali's supplier due is now 26,600 from the purchase above; pay some of it off.
+@@ -82,8 +102,8 @@ recordPayment(db, 'supplier', aliSupp, 10000, null, 'Partial payment, same day')
+ recordPayment(db, 'customer', ahmedCust, 2000, null, 'Partial collection, same day');
+ const ledgerAfterPayments = getDailyLedger(db, LEDGER_DATE);
+ assertEqual('Expenses unchanged by supplier payment', ledgerAfterPayments.total_expenses, 80320);
+-assertEqual('Income unchanged by customer payment', ledgerAfterPayments.total_income, 53500);
+-assertEqual('Profit/Loss unchanged by payments', ledgerAfterPayments.profit_loss, -26820);
++assertEqual('Income unchanged by customer payment', ledgerAfterPayments.total_income, 60700);
++assertEqual('Profit/Loss unchanged by payments', ledgerAfterPayments.profit_loss, -19620);
+ 
+ console.log('\n--- Scenario C3: duplicate ledger creation is rejected ---');
+ try {
