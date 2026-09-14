@@ -123,18 +123,32 @@ CREATE INDEX IF NOT EXISTS idx_shopkeeper_entries_unbilled
 
 -- Daily Ledger: one row per business date, created explicitly by the
 -- shopkeeper (UNIQUE constraint makes accidental duplicates for the same
--- date structurally impossible). Only holds the two genuinely manual
--- fields - Cash Customers and Extra Expenses. Supplier purchases and Khata
--- customer sales are NOT duplicated here; they're aggregated live from
--- supplier_entries/customer_entries by date, so there is exactly one
--- source of truth for every transaction.
+-- date structurally impossible). Holds the manual fields - Sale, Extra
+-- Expenses, and the Items Left breakdown (unsold Live Chicken / Chicken
+-- Meat / Lever, each weight + rate + an optional override total). Supplier
+-- purchases and Khata customer sales are NOT duplicated here; they're
+-- aggregated live from supplier_entries/customer_entries by date, so there
+-- is exactly one source of truth for every transaction. sale_income and
+-- extra_expenses are whole rupees (INTEGER) - this app never deals in
+-- paisas (see floorMoney). Each item's *_total is likewise a whole-rupee
+-- INTEGER: it's either typed in directly or, when left blank, computed as
+-- floor(weight_kg * rate) - same convention as line_total elsewhere.
 CREATE TABLE IF NOT EXISTS daily_ledgers (
-  id                   INTEGER PRIMARY KEY AUTOINCREMENT,
-  ledger_date          TEXT NOT NULL UNIQUE,   -- 'YYYY-MM-DD'
-  cash_customer_income REAL NOT NULL DEFAULT 0,
-  extra_expenses       REAL NOT NULL DEFAULT 0,
-  created_at           TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at           TEXT NOT NULL DEFAULT (datetime('now'))
+  id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+  ledger_date            TEXT NOT NULL UNIQUE,   -- 'YYYY-MM-DD'
+  sale_income            INTEGER NOT NULL DEFAULT 0,
+  extra_expenses         INTEGER NOT NULL DEFAULT 0,
+  live_chicken_weight_kg REAL NOT NULL DEFAULT 0,
+  live_chicken_rate      REAL NOT NULL DEFAULT 0,
+  live_chicken_total     INTEGER NOT NULL DEFAULT 0,
+  chicken_meat_weight_kg REAL NOT NULL DEFAULT 0,
+  chicken_meat_rate      REAL NOT NULL DEFAULT 0,
+  chicken_meat_total     INTEGER NOT NULL DEFAULT 0,
+  lever_weight_kg        REAL NOT NULL DEFAULT 0,
+  lever_rate             REAL NOT NULL DEFAULT 0,
+  lever_total            INTEGER NOT NULL DEFAULT 0,
+  created_at             TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at             TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 -- Needed to aggregate supplier/customer entries by calendar date

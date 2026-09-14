@@ -554,6 +554,15 @@ input:focus, select:focus, button:focus-visible, a:focus-visible, .clickable-row
   margin: 10px 0 0;
 }
 
+.items-left-row {
+  margin-bottom: 18px;
+}
+
+.items-left-row-title {
+  font-size: 15px;
+  margin: 0 0 8px;
+}
+
 .total-preview-row {
   margin-top: 12px;
   font-size: 14px;

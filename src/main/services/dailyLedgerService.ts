@@ -79,10 +79,20 @@ function getKhataSalesForDate(db: Database.Database, date: string): EntryWithPar
 }
 
 /**
+ * Sum of the three Items Left totals - unsold Live Chicken, Chicken Meat,
+ * and Lever. Derived from the stored per-item totals rather than stored
+ * itself, so it can never drift out of sync with them.
+ */
+function itemsLeftTotal(ledger: DailyLedger): number {
+  return floorMoney(ledger.live_chicken_total + ledger.chicken_meat_total + ledger.lever_total);
+}
+
+/**
  * The full Daily Ledger view for one date. Throws if no ledger has been
  * created for that date yet (see createDailyLedger). Every total here is
- * computed fresh from supplier_entries/customer_entries - nothing about
- * supplier or Khata activity is read from or written to daily_ledgers.
+ * computed fresh from supplier_entries/customer_entries (or, for Items
+ * Left, from the ledger's own stored item fields) - nothing about supplier
+ * or Khata activity is read from or written to daily_ledgers.
  */
 export function getDailyLedger(db: Database.Database, ledgerDate: string): DailyLedgerDetail {
   assertValidDate(ledgerDate);
@@ -99,8 +109,10 @@ export function getDailyLedger(db: Database.Database, ledgerDate: string): Daily
 
   const supplierPurchasesTotal = floorMoney(supplierPurchases.reduce((sum, e) => sum + e.line_total, 0));
   const khataSalesTotal = floorMoney(khataSales.reduce((sum, e) => sum + e.line_total, 0));
+  const itemsLeft = itemsLeftTotal(ledger);
 
-  const totalIncome = floorMoney(khataSalesTotal + ledger.cash_customer_income);
+  // Profit/Loss = (Khata sales + Sale + Items Left) - (Extra Expenses + Supplier Purchases)
+  const totalIncome = floorMoney(khataSalesTotal + ledger.sale_income + itemsLeft);
   const totalExpenses = floorMoney(supplierPurchasesTotal + ledger.extra_expenses);
   const profitLoss = floorMoney(totalIncome - totalExpenses);
 
@@ -110,32 +122,83 @@ export function getDailyLedger(db: Database.Database, ledgerDate: string): Daily
     khata_sales: khataSales,
     supplier_purchases_total: supplierPurchasesTotal,
     khata_sales_total: khataSalesTotal,
+    items_left_total: itemsLeft,
     total_income: totalIncome,
     total_expenses: totalExpenses,
     profit_loss: profitLoss,
   };
 }
 
+/** One Items Left row's editable input - weight and rate, plus an optional override total. */
+export interface DailyLedgerItemInput {
+  weightKg?: number;
+  rate?: number;
+  totalAmount?: number; // omit/blank to auto-calculate as floor(weightKg * rate)
+}
+
+export interface UpdateDailyLedgerFieldsInput {
+  saleIncome?: number;
+  extraExpenses?: number;
+  liveChicken?: DailyLedgerItemInput;
+  chickenMeat?: DailyLedgerItemInput;
+  lever?: DailyLedgerItemInput;
+}
+
+function validateNonNegative(value: number, label: string): void {
+  if (!Number.isFinite(value) || value < 0) {
+    throw new Error(`${label} must be zero or a positive number`);
+  }
+}
+
 /**
- * Updates the two manual fields - Cash Customers Total and Extra Expenses.
- * Each behaves as one single number (spec sections 8 & 12): no breakdown,
- * no sub-records. An empty/omitted field is treated as Rs. 0, not
- * required input (spec section 28).
+ * Resolves one Items Left row against its previously stored values. Only
+ * touches this item at all if the caller actually supplied something for
+ * it (see updateDailyLedgerFields) - otherwise the item's stored weight/
+ * rate/total pass straight through unchanged. When touched, a missing
+ * weight or rate within that item defaults to 0 (mirrors the "blank = 0"
+ * rule already used for Extra Expenses/Sale); a missing total is computed
+ * as floor(weight * rate) rather than defaulted to 0, since the total is
+ * explicitly optional (spec: "total amount (optional)").
+ */
+function resolveItem(
+  input: DailyLedgerItemInput | undefined,
+  existingWeight: number,
+  existingRate: number,
+  existingTotal: number,
+  label: string
+): { weightKg: number; rate: number; total: number } {
+  if (!input) {
+    return { weightKg: existingWeight, rate: existingRate, total: existingTotal };
+  }
+  const weightKg = input.weightKg ?? 0;
+  const rate = input.rate ?? 0;
+  validateNonNegative(weightKg, `${label} weight`);
+  validateNonNegative(rate, `${label} rate`);
+  let total: number;
+  if (input.totalAmount !== undefined) {
+    validateNonNegative(input.totalAmount, `${label} total amount`);
+    total = floorMoney(input.totalAmount);
+  } else {
+    total = floorMoney(weightKg * rate);
+  }
+  return { weightKg, rate, total };
+}
+
+/**
+ * Updates the manual fields: Sale, Extra Expenses, and the Items Left
+ * breakdown (Live Chicken / Chicken Meat / Lever). These are saved from two
+ * independent forms in the UI, so each group here is only touched when the
+ * caller actually supplies something for it - an omitted group keeps its
+ * previously stored values rather than being reset to 0, and an omitted
+ * field *within* a supplied group defaults to 0 (spec section 28, extended
+ * to Items Left).
  */
 export function updateDailyLedgerFields(
   db: Database.Database,
   ledgerDate: string,
-  cashCustomerIncome: number = 0,
-  extraExpenses: number = 0
+  input: UpdateDailyLedgerFieldsInput = {}
 ): DailyLedger {
   assertValidDate(ledgerDate);
-
-  if (!Number.isFinite(cashCustomerIncome) || cashCustomerIncome < 0) {
-    throw new Error('Cash Customers Total must be zero or a positive number');
-  }
-  if (!Number.isFinite(extraExpenses) || extraExpenses < 0) {
-    throw new Error('Extra Expenses must be zero or a positive number');
-  }
 
   const existing = db
     .prepare('SELECT * FROM daily_ledgers WHERE ledger_date = ?')
@@ -144,12 +207,51 @@ export function updateDailyLedgerFields(
     throw new Error(`No Daily Ledger exists for ${ledgerDate} yet - create it first`);
   }
 
+  const saleIncome = input.saleIncome !== undefined ? input.saleIncome : existing.sale_income;
+  const extraExpenses = input.extraExpenses !== undefined ? input.extraExpenses : existing.extra_expenses;
+  validateNonNegative(saleIncome, 'Sale');
+  validateNonNegative(extraExpenses, 'Extra Expenses');
+
+  const liveChicken = resolveItem(
+    input.liveChicken,
+    existing.live_chicken_weight_kg,
+    existing.live_chicken_rate,
+    existing.live_chicken_total,
+    'Live Chicken'
+  );
+  const chickenMeat = resolveItem(
+    input.chickenMeat,
+    existing.chicken_meat_weight_kg,
+    existing.chicken_meat_rate,
+    existing.chicken_meat_total,
+    'Chicken Meat'
+  );
+  const lever = resolveItem(input.lever, existing.lever_weight_kg, existing.lever_rate, existing.lever_total, 'Lever');
+
   const updatedAt = `${pakistanNow().date} ${pakistanNow().time}`;
   db.prepare(
     `UPDATE daily_ledgers
-     SET cash_customer_income = ?, extra_expenses = ?, updated_at = ?
+     SET sale_income = ?, extra_expenses = ?,
+         live_chicken_weight_kg = ?, live_chicken_rate = ?, live_chicken_total = ?,
+         chicken_meat_weight_kg = ?, chicken_meat_rate = ?, chicken_meat_total = ?,
+         lever_weight_kg = ?, lever_rate = ?, lever_total = ?,
+         updated_at = ?
      WHERE ledger_date = ?`
-  ).run(floorMoney(cashCustomerIncome), floorMoney(extraExpenses), updatedAt, ledgerDate);
+  ).run(
+    floorMoney(saleIncome),
+    floorMoney(extraExpenses),
+    liveChicken.weightKg,
+    liveChicken.rate,
+    liveChicken.total,
+    chickenMeat.weightKg,
+    chickenMeat.rate,
+    chickenMeat.total,
+    lever.weightKg,
+    lever.rate,
+    lever.total,
+    updatedAt,
+    ledgerDate
+  );
 
   return db.prepare('SELECT * FROM daily_ledgers WHERE ledger_date = ?').get(ledgerDate) as DailyLedger;
 }
@@ -203,7 +305,7 @@ export function listDailyLedgers(
           .get(ledger.ledger_date) as { total: number }
       ).total
     );
-    const totalIncome = floorMoney(khataTotal + ledger.cash_customer_income);
+    const totalIncome = floorMoney(khataTotal + ledger.sale_income + itemsLeftTotal(ledger));
     const totalExpenses = floorMoney(supplierTotal + ledger.extra_expenses);
     return {
       ledger_date: ledger.ledger_date,
@@ -216,8 +318,8 @@ export function listDailyLedgers(
 
 /**
  * Monthly totals, summed only across dates that actually have a Daily
- * Ledger created - a date with no ledger has no recorded Cash Customers /
- * Extra Expenses figure, so including it would silently understate
+ * Ledger created - a date with no ledger has no recorded Sale / Extra
+ * Expenses / Items Left figure, so including it would silently understate
  * expenses and overstate profit for that day. month is 1-12.
  */
 export function getMonthlySummary(
