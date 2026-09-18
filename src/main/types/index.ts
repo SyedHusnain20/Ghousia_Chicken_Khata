@@ -106,6 +106,15 @@ export interface DailyLedger {
   updated_at: string;
 }
 
+// One Udhar row on a Daily Ledger: a name and an amount, no customer profile.
+export interface LedgerUdhar {
+  id: number;
+  ledger_date: string; // 'YYYY-MM-DD'
+  name: string;
+  amount: number; // whole rupees
+  created_at: string;
+}
+
 // The full view shown on the Daily Ledger page: the manual fields plus
 // everything derived live from supplier_entries/customer_entries for that
 // date. supplier_purchases_total and khata_sales_total are NEVER stored -
@@ -119,6 +128,10 @@ export interface DailyLedgerDetail extends DailyLedger {
   supplier_purchases_total: number;
   khata_sales_total: number;
   items_left_total: number;
+  // Udhar rows for this date and their sum - like the totals above, the sum
+  // is derived from the rows on every read, never stored.
+  udhars: LedgerUdhar[];
+  udhar_total: number;
   total_income: number;
   total_expenses: number;
   profit_loss: number;

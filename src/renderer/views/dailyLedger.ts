@@ -2,7 +2,7 @@ import { el, mount } from '../dom';
 import { formatDate, formatProfitLoss, formatRs, todayIso } from '../format';
 import { emptyState, errorBanner, errorMessage, loadingState, pageHeader } from '../components';
 import { navigate } from '../router';
-import type { DailyLedgerDetail, EntryWithPartyName } from '../../main/types';
+import type { DailyLedgerDetail, EntryWithPartyName, LedgerUdhar } from '../../main/types';
 import type { UpdateDailyLedgerFieldsRequest } from '../../shared/ipc';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -408,6 +408,140 @@ function itemsLeftForm(ledgerDate: string, rows: ItemLeftRowDef[], onSaved: () =
   return form;
 }
 
+// The Udhar form: any number of name + amount rows for the day. The "+"
+// button appends another empty row; each row has an "x" to remove it (the
+// last remaining row is cleared instead of removed, so the form never ends
+// up with no inputs at all). The running total under the rows updates as
+// the shopkeeper types. Saving sends every filled-in row and the backend
+// replaces the day's Udhar list with exactly that, so removed rows are
+// removed for good. Rows left completely empty are simply ignored; a row
+// with only a name or only an amount is an error rather than being silently
+// dropped. Independent of the other two forms - it only touches Udhar.
+function udharForm(ledgerDate: string, saved: LedgerUdhar[], onSaved: () => void): HTMLElement {
+  const errorSlot = el('div', { class: 'form-error-slot' });
+  const previewSlot = el('div', {});
+  const rowsWrap = el('div', { class: 'udhar-rows' });
+
+  interface UdharRowRefs {
+    rowEl: HTMLElement;
+    nameInput: HTMLInputElement;
+    amountInput: HTMLInputElement;
+  }
+  const rowRefs: UdharRowRefs[] = [];
+
+  function refreshTotal(): void {
+    let total = 0;
+    for (const { amountInput } of rowRefs) {
+      const amount = amountInput.value.trim() === '' ? 0 : Number(amountInput.value);
+      if (Number.isFinite(amount) && amount > 0) total += floorMoney(amount);
+    }
+    previewSlot.replaceChildren(totalLine('Udhar Total', total, true));
+  }
+
+  function addRow(name = '', amount = ''): void {
+    const nameInput = el('input', { type: 'text', placeholder: 'Name', value: name }) as HTMLInputElement;
+    const amountInput = el('input', {
+      type: 'number',
+      step: '1',
+      min: '0',
+      placeholder: '0',
+      value: amount,
+    }) as HTMLInputElement;
+    const removeBtn = el(
+      'button',
+      { class: 'btn btn-secondary btn-small udhar-remove', type: 'button', title: 'Remove this udhar', 'aria-label': 'Remove this udhar' },
+      ['\u00d7']
+    );
+
+    const rowEl = el('div', { class: 'udhar-row' }, [
+      el('label', {}, ['Name', nameInput]),
+      el('label', {}, ['Amount (Rs.)', amountInput]),
+      removeBtn,
+    ]);
+    const refs: UdharRowRefs = { rowEl, nameInput, amountInput };
+
+    amountInput.addEventListener('input', refreshTotal);
+    removeBtn.addEventListener('click', () => {
+      if (rowRefs.length === 1) {
+        nameInput.value = '';
+        amountInput.value = '';
+        nameInput.focus();
+      } else {
+        rowRefs.splice(rowRefs.indexOf(refs), 1);
+        rowEl.remove();
+      }
+      refreshTotal();
+    });
+
+    rowRefs.push(refs);
+    rowsWrap.append(rowEl);
+  }
+
+  if (saved.length > 0) {
+    for (const u of saved) addRow(u.name, String(u.amount));
+  } else {
+    addRow();
+  }
+
+  const plusBtn = el('button', { class: 'btn btn-secondary', type: 'button', title: 'Add another udhar' }, [
+    '+ Add Udhar',
+  ]);
+  plusBtn.addEventListener('click', () => {
+    addRow();
+    refreshTotal();
+    rowRefs[rowRefs.length - 1].nameInput.focus();
+  });
+
+  const form = el('form', { class: 'inline-form' }, [
+    rowsWrap,
+    el('div', { class: 'form-actions' }, [plusBtn]),
+    previewSlot,
+    errorSlot,
+    el('div', { class: 'form-actions' }, [
+      el('button', { class: 'btn btn-primary', type: 'submit' }, ['Save Udhar']),
+    ]),
+  ]);
+
+  refreshTotal();
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    errorSlot.replaceChildren();
+
+    const udhars: { name: string; amount: number }[] = [];
+    for (let i = 0; i < rowRefs.length; i++) {
+      const name = rowRefs[i].nameInput.value.trim();
+      const rawAmount = rowRefs[i].amountInput.value.trim();
+      if (name === '' && rawAmount === '') continue; // untouched row - ignore
+
+      const rowLabel = `Udhar row ${i + 1}`;
+      if (name === '') {
+        errorSlot.append(errorBanner(`${rowLabel}: please enter a name.`));
+        return;
+      }
+      const amount = Number(rawAmount);
+      if (rawAmount === '' || !Number.isFinite(amount) || floorMoney(amount) < 1) {
+        errorSlot.append(errorBanner(`${rowLabel}: amount must be at least Rs. 1.`));
+        return;
+      }
+      udhars.push({ name, amount: floorMoney(amount) });
+    }
+
+    const submitBtn = form.querySelector('button[type="submit"]') as HTMLButtonElement;
+    submitBtn.disabled = true;
+    try {
+      await window.khata.saveDailyLedgerUdhars({ ledgerDate, udhars });
+      onSaved();
+    } catch (err) {
+      errorSlot.replaceChildren(errorBanner(errorMessage(err)));
+    } finally {
+      submitBtn.disabled = false;
+    }
+  });
+
+  return form;
+}
+
 // The headline Profit/Loss card. Reuses the .due-hero styling (and its
 // due/credit/clear color language) already established for party balances,
 // since the semantics line up: profit = credit green, loss = due red.
@@ -528,6 +662,7 @@ export async function renderDailyLedger(ledgerDate: string, container: HTMLEleme
           ),
           totalLine('Sale', detail.sale_income),
           totalLine('Items Left', detail.items_left_total),
+          totalLine('Udhar', detail.udhar_total),
           el('hr', { class: 'ledger-total-rule' }),
           totalLine('Total Income', detail.total_income, true),
         ]),
@@ -542,6 +677,14 @@ export async function renderDailyLedger(ledgerDate: string, container: HTMLEleme
         itemsLeftTable(itemRows, detail.items_left_total),
         el('hr', { class: 'ledger-total-rule' }),
         itemsLeftForm(ledgerDate, itemRows, load),
+      ]),
+      el('section', { class: 'panel' }, [
+        el('h2', {}, ['Udhar']),
+        el('p', { class: 'field-hint' }, [
+          'Add one row per udhar \u2014 a name and an amount. Press \u201c+ Add Udhar\u201d for more rows. ' +
+            'Empty rows are ignored when you save.',
+        ]),
+        udharForm(ledgerDate, detail.udhars, load),
       ])
     );
   }

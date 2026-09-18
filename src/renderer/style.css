@@ -563,6 +563,23 @@ input:focus, select:focus, button:focus-visible, a:focus-visible, .clickable-row
   margin: 0 0 8px;
 }
 
+/* Udhar rows: name + amount side by side, with a small remove button that
+   lines up with the bottom of the inputs (not the labels above them). */
+.udhar-row {
+  display: grid;
+  grid-template-columns: 2fr 1fr auto;
+  gap: 14px;
+  align-items: end;
+  margin-bottom: 12px;
+}
+
+.udhar-remove {
+  height: 40px;
+  min-width: 40px;
+  font-size: 18px;
+  line-height: 1;
+}
+
 .total-preview-row {
   margin-top: 12px;
   font-size: 14px;
