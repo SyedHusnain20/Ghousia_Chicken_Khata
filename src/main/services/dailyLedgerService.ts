@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3';
-import { DailyLedger, DailyLedgerDetail, DailyLedgerSummary, EntryWithPartyName } from '../types';
+import { DailyLedger, DailyLedgerDetail, DailyLedgerSummary, EntryWithPartyName, LedgerUdhar } from '../types';
 import { floorMoney, DATE_ONLY_RE, pakistanNow } from './partyService';
 
 function assertValidDate(date: string): void {
@@ -79,6 +79,17 @@ function getKhataSalesForDate(db: Database.Database, date: string): EntryWithPar
 }
 
 /**
+ * The Udhar rows saved for one date, in the order they were entered.
+ * Udhar is a plain name + amount per row - there's no customer profile
+ * behind it, so nothing is joined here.
+ */
+function getUdharsForDate(db: Database.Database, date: string): LedgerUdhar[] {
+  return db
+    .prepare('SELECT * FROM daily_ledger_udhars WHERE ledger_date = ? ORDER BY id')
+    .all(date) as LedgerUdhar[];
+}
+
+/**
  * Sum of the three Items Left totals - unsold Live Chicken, Chicken Meat,
  * and Lever. Derived from the stored per-item totals rather than stored
  * itself, so it can never drift out of sync with them.
@@ -91,8 +102,9 @@ function itemsLeftTotal(ledger: DailyLedger): number {
  * The full Daily Ledger view for one date. Throws if no ledger has been
  * created for that date yet (see createDailyLedger). Every total here is
  * computed fresh from supplier_entries/customer_entries (or, for Items
- * Left, from the ledger's own stored item fields) - nothing about supplier
- * or Khata activity is read from or written to daily_ledgers.
+ * Left, from the ledger's own stored item fields; for Udhar, from its own
+ * rows) - nothing about supplier or Khata activity is read from or written
+ * to daily_ledgers.
  */
 export function getDailyLedger(db: Database.Database, ledgerDate: string): DailyLedgerDetail {
   assertValidDate(ledgerDate);
@@ -110,9 +122,11 @@ export function getDailyLedger(db: Database.Database, ledgerDate: string): Daily
   const supplierPurchasesTotal = floorMoney(supplierPurchases.reduce((sum, e) => sum + e.line_total, 0));
   const khataSalesTotal = floorMoney(khataSales.reduce((sum, e) => sum + e.line_total, 0));
   const itemsLeft = itemsLeftTotal(ledger);
+  const udhars = getUdharsForDate(db, ledgerDate);
+  const udharTotal = floorMoney(udhars.reduce((sum, u) => sum + u.amount, 0));
 
-  // Profit/Loss = (Khata sales + Sale + Items Left) - (Extra Expenses + Supplier Purchases)
-  const totalIncome = floorMoney(khataSalesTotal + ledger.sale_income + itemsLeft);
+  // Profit/Loss = (Khata sales + Sale + Items Left + Udhar) - (Extra Expenses + Supplier Purchases)
+  const totalIncome = floorMoney(khataSalesTotal + ledger.sale_income + itemsLeft + udharTotal);
   const totalExpenses = floorMoney(supplierPurchasesTotal + ledger.extra_expenses);
   const profitLoss = floorMoney(totalIncome - totalExpenses);
 
@@ -123,6 +137,8 @@ export function getDailyLedger(db: Database.Database, ledgerDate: string): Daily
     supplier_purchases_total: supplierPurchasesTotal,
     khata_sales_total: khataSalesTotal,
     items_left_total: itemsLeft,
+    udhars,
+    udhar_total: udharTotal,
     total_income: totalIncome,
     total_expenses: totalExpenses,
     profit_loss: profitLoss,
@@ -256,6 +272,59 @@ export function updateDailyLedgerFields(
   return db.prepare('SELECT * FROM daily_ledgers WHERE ledger_date = ?').get(ledgerDate) as DailyLedger;
 }
 
+/** One Udhar row as entered on the form. */
+export interface DailyLedgerUdharInput {
+  name: string;
+  amount: number;
+}
+
+/**
+ * Replaces the whole set of Udhar rows for a date with the ones supplied.
+ * The Udhar form always submits every row it is showing (that's how a row
+ * removed with the "x" button disappears), so a delete-then-insert inside
+ * one transaction is the simplest thing that can't leave the day half-saved:
+ * either all the new rows are in, or the previous rows are untouched.
+ * Passing an empty list clears the day's Udhar. Each row needs a name and a
+ * positive amount; amounts are floored to whole rupees like all other money.
+ */
+export function saveDailyLedgerUdhars(
+  db: Database.Database,
+  ledgerDate: string,
+  inputs: DailyLedgerUdharInput[]
+): LedgerUdhar[] {
+  assertValidDate(ledgerDate);
+
+  const ledger = db
+    .prepare('SELECT id FROM daily_ledgers WHERE ledger_date = ?')
+    .get(ledgerDate) as { id: number } | undefined;
+  if (!ledger) {
+    throw new Error(`No Daily Ledger exists for ${ledgerDate} yet - create it first`);
+  }
+
+  const cleaned = inputs.map((input, i) => {
+    const rowLabel = `Udhar row ${i + 1}`;
+    const name = typeof input.name === 'string' ? input.name.trim() : '';
+    if (name === '') {
+      throw new Error(`${rowLabel}: name is required`);
+    }
+    if (!Number.isFinite(input.amount) || floorMoney(input.amount) < 1) {
+      throw new Error(`${rowLabel}: amount must be at least Rs. 1`);
+    }
+    return { name, amount: floorMoney(input.amount) };
+  });
+
+  const replaceAll = db.transaction(() => {
+    db.prepare('DELETE FROM daily_ledger_udhars WHERE ledger_date = ?').run(ledgerDate);
+    const insert = db.prepare('INSERT INTO daily_ledger_udhars (ledger_date, name, amount) VALUES (?, ?, ?)');
+    for (const row of cleaned) {
+      insert.run(ledgerDate, row.name, row.amount);
+    }
+  });
+  replaceAll();
+
+  return getUdharsForDate(db, ledgerDate);
+}
+
 /**
  * History list for a date range (inclusive). Each row's totals are
  * derived the same way as getDailyLedger, just without the line-item
@@ -305,7 +374,14 @@ export function listDailyLedgers(
           .get(ledger.ledger_date) as { total: number }
       ).total
     );
-    const totalIncome = floorMoney(khataTotal + ledger.sale_income + itemsLeftTotal(ledger));
+    const udharTotal = floorMoney(
+      (
+        db
+          .prepare(`SELECT COALESCE(SUM(amount), 0) AS total FROM daily_ledger_udhars WHERE ledger_date = ?`)
+          .get(ledger.ledger_date) as { total: number }
+      ).total
+    );
+    const totalIncome = floorMoney(khataTotal + ledger.sale_income + itemsLeftTotal(ledger) + udharTotal);
     const totalExpenses = floorMoney(supplierTotal + ledger.extra_expenses);
     return {
       ledger_date: ledger.ledger_date,

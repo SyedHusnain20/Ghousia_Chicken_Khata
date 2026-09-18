@@ -11,6 +11,7 @@ import {
   DailyLedger,
   DailyLedgerDetail,
   DailyLedgerSummary,
+  LedgerUdhar,
 } from '../main/types';
 import type { SnapshotInfo } from '../main/backup/snapshotService';
 export type { SnapshotInfo };
@@ -38,6 +39,7 @@ export const IpcChannels = {
   DAILY_LEDGER_CREATE: 'daily-ledger:create',
   DAILY_LEDGER_GET: 'daily-ledger:get',
   DAILY_LEDGER_UPDATE_FIELDS: 'daily-ledger:update-fields',
+  DAILY_LEDGER_SAVE_UDHARS: 'daily-ledger:save-udhars',
   DAILY_LEDGER_LIST: 'daily-ledger:list',
   DAILY_LEDGER_MONTHLY_SUMMARY: 'daily-ledger:monthly-summary',
   STORAGE_GET_INFO: 'storage:get-info',
@@ -206,6 +208,13 @@ export interface UpdateDailyLedgerFieldsRequest {
   leverTotal?: number;
 }
 
+// Replaces the whole Udhar list for a date - the form always sends every row
+// it is showing, so a row removed on screen is removed here too.
+export interface SaveDailyLedgerUdharsRequest {
+  ledgerDate: string;
+  udhars: { name: string; amount: number }[];
+}
+
 export interface ListDailyLedgersRequest {
   fromDate?: string;
   toDate?: string;
@@ -287,6 +296,7 @@ export interface KhataApi {
   createDailyLedger(req: CreateDailyLedgerRequest): Promise<DailyLedger>;
   getDailyLedger(req: GetDailyLedgerRequest): Promise<DailyLedgerDetail>;
   updateDailyLedgerFields(req: UpdateDailyLedgerFieldsRequest): Promise<DailyLedger>;
+  saveDailyLedgerUdhars(req: SaveDailyLedgerUdharsRequest): Promise<LedgerUdhar[]>;
   listDailyLedgers(req: ListDailyLedgersRequest): Promise<DailyLedgerSummary[]>;
   getMonthlySummary(req: GetMonthlySummaryRequest): Promise<MonthlySummary>;
   getStorageInfo(): Promise<StorageInfo>;

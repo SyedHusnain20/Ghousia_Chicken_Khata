@@ -21,6 +21,7 @@ import type {
   CreateDailyLedgerRequest,
   GetDailyLedgerRequest,
   UpdateDailyLedgerFieldsRequest,
+  SaveDailyLedgerUdharsRequest,
   ListDailyLedgersRequest,
   GetMonthlySummaryRequest,
 } from '../shared/ipc';
@@ -47,6 +48,7 @@ import {
   createDailyLedger,
   getDailyLedger,
   updateDailyLedgerFields,
+  saveDailyLedgerUdhars,
   listDailyLedgers,
   getMonthlySummary,
 } from './services/dailyLedgerService';
@@ -174,6 +176,10 @@ export function registerIpcHandlers(db: Database.Database): void {
         : undefined,
       lever: hasLeverInput ? { weightKg: req.leverWeightKg, rate: req.leverRate, totalAmount: req.leverTotal } : undefined,
     });
+  });
+
+  ipcMain.handle(IpcChannels.DAILY_LEDGER_SAVE_UDHARS, (_event, req: SaveDailyLedgerUdharsRequest) => {
+    return saveDailyLedgerUdhars(db, req.ledgerDate, req.udhars);
   });
 
   ipcMain.handle(IpcChannels.DAILY_LEDGER_LIST, (_event, req: ListDailyLedgersRequest) => {

@@ -151,6 +151,24 @@ CREATE TABLE IF NOT EXISTS daily_ledgers (
   updated_at             TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Daily Ledger "Udhar": informal credit sales for the day that don't belong
+-- to a Khata customer profile - just a name and an amount, as many rows per
+-- day as needed. Keyed by ledger_date (not a foreign key to daily_ledgers.id)
+-- for the same reason supplier/customer entries are: everything on the Daily
+-- Ledger page is looked up by business date. The rows are saved as a whole
+-- set per date (see saveDailyLedgerUdhars) and the Udhar total is always
+-- summed live from them, never stored, so it can't drift. amount is a whole
+-- rupee INTEGER like every other money column on the ledger.
+CREATE TABLE IF NOT EXISTS daily_ledger_udhars (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  ledger_date TEXT NOT NULL,              -- 'YYYY-MM-DD'
+  name        TEXT NOT NULL,
+  amount      INTEGER NOT NULL,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_daily_ledger_udhars_date ON daily_ledger_udhars (ledger_date);
+
 -- Needed to aggregate supplier/customer entries by calendar date
 -- efficiently once the entries table has months of history in it.
 CREATE INDEX IF NOT EXISTS idx_supplier_entries_date ON supplier_entries (entry_date);
