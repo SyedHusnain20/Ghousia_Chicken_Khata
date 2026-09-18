@@ -105,6 +105,8 @@ function itemsLeftTotal(ledger: DailyLedger): number {
  * Left, from the ledger's own stored item fields; for Udhar, from its own
  * rows) - nothing about supplier or Khata activity is read from or written
  * to daily_ledgers.
+ * Left, from the ledger's own stored item fields) - nothing about supplier
+ * or Khata activity is read from or written to daily_ledgers.
  */
 export function getDailyLedger(db: Database.Database, ledgerDate: string): DailyLedgerDetail {
   assertValidDate(ledgerDate);
@@ -127,6 +129,9 @@ export function getDailyLedger(db: Database.Database, ledgerDate: string): Daily
 
   // Profit/Loss = (Khata sales + Sale + Items Left + Udhar) - (Extra Expenses + Supplier Purchases)
   const totalIncome = floorMoney(khataSalesTotal + ledger.sale_income + itemsLeft + udharTotal);
+
+  // Profit/Loss = (Khata sales + Sale + Items Left) - (Extra Expenses + Supplier Purchases)
+  const totalIncome = floorMoney(khataSalesTotal + ledger.sale_income + itemsLeft);
   const totalExpenses = floorMoney(supplierPurchasesTotal + ledger.extra_expenses);
   const profitLoss = floorMoney(totalIncome - totalExpenses);
 
@@ -382,6 +387,7 @@ export function listDailyLedgers(
       ).total
     );
     const totalIncome = floorMoney(khataTotal + ledger.sale_income + itemsLeftTotal(ledger) + udharTotal);
+    const totalIncome = floorMoney(khataTotal + ledger.sale_income + itemsLeftTotal(ledger));
     const totalExpenses = floorMoney(supplierTotal + ledger.extra_expenses);
     return {
       ledger_date: ledger.ledger_date,
