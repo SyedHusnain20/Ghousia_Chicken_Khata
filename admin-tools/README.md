@@ -61,3 +61,23 @@ point - you don't need to do anything extra.
 Replace the client's live `khata.db` with the fixed copy (app closed),
 then have them reopen the app and confirm the supplier is gone and the
 numbers look right.
+
+
+## If the owner forgets the app password
+
+The start-up password is stored only as a salted hash in a small file,
+`app-lock.json`, in the app's own data folder on that laptop (the same
+folder that holds `storage-config.json` - normally a folder named after
+the app under `%APPDATA%`). It is deliberately NOT inside `khata.db`, so
+it is never uploaded to OneDrive and restoring an old backup can't bring
+back an old password.
+
+There is no way to recover the password itself. To reset it:
+
+1. Close the app on the client's laptop.
+2. Delete `app-lock.json` from that folder.
+3. Open the app - it shows the "Set a password" screen again, and the
+   owner picks a new one. Their data in `khata.db` is untouched.
+
+This is an app-level lock, not disk encryption: it keeps people out of the
+app, but `khata.db` itself is a normal, unencrypted file.

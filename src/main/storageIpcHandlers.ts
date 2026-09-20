@@ -1,4 +1,5 @@
-import { app, dialog, ipcMain, shell, BrowserWindow } from 'electron';
+import { app, dialog, shell, BrowserWindow } from 'electron';
+import { guardedHandle } from './security/ipcGuard';
 import fs from 'fs';
 import path from 'path';
 import Database from 'better-sqlite3';
@@ -32,7 +33,7 @@ export function registerStorageIpcHandlers(
   getDbFolderPath: () => string,
   getMainWindow: () => BrowserWindow | null
 ): void {
-  ipcMain.handle(IpcChannels.STORAGE_GET_INFO, (): StorageInfo => {
+  guardedHandle(IpcChannels.STORAGE_GET_INFO, (): StorageInfo => {
     const dbFolderPath = getDbFolderPath();
     const oneDriveDetectedPath = detectOneDrivePath();
     return {
@@ -44,7 +45,7 @@ export function registerStorageIpcHandlers(
     };
   });
 
-  ipcMain.handle(IpcChannels.STORAGE_CHOOSE_FOLDER, async (): Promise<ChooseFolderResult | null> => {
+  guardedHandle(IpcChannels.STORAGE_CHOOSE_FOLDER, async (): Promise<ChooseFolderResult | null> => {
     const win = getMainWindow();
     const result = win
       ? await dialog.showOpenDialog(win, { properties: ['openDirectory', 'createDirectory'] })
@@ -57,7 +58,7 @@ export function registerStorageIpcHandlers(
     };
   });
 
-  ipcMain.handle(IpcChannels.STORAGE_CONFIRM_CHANGE, (_event, req: ConfirmChangeStorageRequest): void => {
+  guardedHandle(IpcChannels.STORAGE_CONFIRM_CHANGE, (_event, req: ConfirmChangeStorageRequest): void => {
     const db = getDb();
     const currentDbPath = dbFilePathFor(getDbFolderPath());
     db.close(); // must close before moving the file out from under it
@@ -78,15 +79,15 @@ export function registerStorageIpcHandlers(
     }
   });
 
-  ipcMain.handle(IpcChannels.STORAGE_CREATE_SNAPSHOT_NOW, () => {
+  guardedHandle(IpcChannels.STORAGE_CREATE_SNAPSHOT_NOW, () => {
     return createSnapshotNow(getDb(), getDbFolderPath());
   });
 
-  ipcMain.handle(IpcChannels.STORAGE_OPEN_FOLDER, async () => {
+  guardedHandle(IpcChannels.STORAGE_OPEN_FOLDER, async () => {
     await shell.openPath(getDbFolderPath());
   });
 
-  ipcMain.handle(IpcChannels.STORAGE_CHOOSE_RESTORE_FILE, async (): Promise<ChooseRestoreFileResult | null> => {
+  guardedHandle(IpcChannels.STORAGE_CHOOSE_RESTORE_FILE, async (): Promise<ChooseRestoreFileResult | null> => {
     const win = getMainWindow();
     const options = {
       title: 'Choose a backup to restore',
@@ -100,7 +101,7 @@ export function registerStorageIpcHandlers(
     return { filePath, isValid: isValidKhataDatabase(filePath) };
   });
 
-  ipcMain.handle(IpcChannels.STORAGE_CONFIRM_RESTORE, (_event, req: ConfirmRestoreRequest): void => {
+  guardedHandle(IpcChannels.STORAGE_CONFIRM_RESTORE, (_event, req: ConfirmRestoreRequest): void => {
     const db = getDb();
     const currentDbPath = dbFilePathFor(getDbFolderPath());
     db.close(); // must close before overwriting the file out from under it

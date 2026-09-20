@@ -7,6 +7,14 @@ export function errorMessage(err: unknown): string {
   return String(err);
 }
 
+// Electron wraps an error thrown in the main process as "Error invoking
+// remote method 'channel': Error: <message>". Screens where the message is
+// shown straight to the shopkeeper (password prompts, restore bill) use this
+// to show just the <message> part.
+export function ipcErrorMessage(err: unknown): string {
+  return errorMessage(err).replace(/^Error invoking remote method '[^']*': (?:Error: )?/, '');
+}
+
 export function errorBanner(message: string): HTMLElement {
   return el('div', { class: 'banner banner-error', role: 'alert' }, [message]);
 }

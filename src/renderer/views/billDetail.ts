@@ -1,6 +1,7 @@
 import { el, mount } from '../dom';
 import { formatDateShort, formatDateTime, formatRs } from '../format';
-import { button, errorBanner, errorMessage, loadingState, successBanner } from '../components';
+import { button, confirmDialog, errorBanner, errorMessage, ipcErrorMessage, loadingState, successBanner } from '../components';
+import { navigate } from '../router';
 import { SHOP_NAME_EN, SHOP_NAME_UR } from '../shopConfig';
 import type { BillDetail, PartyType } from '../../main/types';
 
@@ -97,6 +98,15 @@ function receiptMarkup(bill: BillDetail): HTMLElement {
   ]);
 }
 
+// "3 entries and 2 payments" / "1 entry" / "2 payments" - leaves out whichever
+// part is zero, since a bill can hold only entries or only payments.
+function describeContents(entries: number, payments: number): string {
+  const parts: string[] = [];
+  if (entries > 0) parts.push(`${entries} ${entries === 1 ? 'entry' : 'entries'}`);
+  if (payments > 0) parts.push(`${payments} ${payments === 1 ? 'payment' : 'payments'}`);
+  return parts.length > 0 ? parts.join(' and ') : '0 entries';
+}
+
 export async function renderBillDetail(
   partyType: PartyType,
   billId: number,
@@ -140,12 +150,48 @@ export async function renderBillDetail(
     }
   }, 'secondary');
 
+  const restoreBtn = button('Restore bill', async () => {
+    shareStatus.replaceChildren();
+
+    const confirmed = await confirmDialog(
+      `Restore Bill #${bill.id} for ${bill.party_name}?\n\n` +
+        `Its ${describeContents(bill.items.length, bill.payments.length)} will go back to unbilled, ` +
+        `with their original dates and amounts, and this bill will be deleted.\n\n` +
+        `You can then edit or delete entries and generate a new bill. Any copy of this bill that was ` +
+        `already printed or sent on WhatsApp will no longer match your records.`,
+      { confirmLabel: 'Restore & Delete Bill', danger: true }
+    );
+    if (!confirmed) return;
+
+    restoreBtn.disabled = true;
+    try {
+      const result = await window.khata.restoreBill({ partyType, billId: bill.id });
+      // The bill no longer exists, so this page can't be shown again - swap
+      // it for a confirmation and a way straight to the entries.
+      mount(
+        container,
+        el('div', { class: 'page-header' }, [el('h1', {}, ['Bill restored'])]),
+        successBanner(
+          `Bill #${bill.id} was deleted. Its ${describeContents(result.entriesRestored, result.paymentsRestored)} ` +
+            `${result.entriesRestored + result.paymentsRestored === 1 ? 'is' : 'are'} back in the unbilled list for ${result.partyName}, ` +
+            `with their original dates and amounts.`
+        ),
+        el('div', { class: 'form-actions' }, [
+          button(`Go to ${result.partyName}`, () => navigate(`/${partyType}s/${result.partyId}`)),
+        ])
+      );
+    } catch (err) {
+      shareStatus.replaceChildren(errorBanner(ipcErrorMessage(err)));
+      restoreBtn.disabled = false;
+    }
+  }, 'danger');
+
   mount(
     container,
     el('div', { class: 'no-print' }, [backLink]),
     el('div', { class: 'page-header no-print' }, [
       el('h1', {}, [TITLE[bill.party_type]]),
-      el('div', { class: 'page-header-actions' }, [printBtn, shareBtn]),
+      el('div', { class: 'page-header-actions' }, [printBtn, shareBtn, restoreBtn]),
     ]),
     shareStatus,
     receiptMarkup(bill)

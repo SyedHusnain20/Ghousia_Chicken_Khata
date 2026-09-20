@@ -6,6 +6,7 @@ import {
   Bill,
   BillListItem,
   BillDetail,
+  RestoreBillResult,
   Payment,
   PaymentMethod,
   DailyLedger,
@@ -33,6 +34,7 @@ export const IpcChannels = {
   BILL_LIST_FOR_PARTY: 'bill:list-for-party',
   BILL_GET: 'bill:get',
   BILL_LIST_ALL: 'bill:list-all',
+  BILL_RESTORE: 'bill:restore',
   PAYMENT_RECORD: 'payment:record',
   PAYMENT_LIST: 'payment:list',
   PAYMENT_LIST_UNBILLED: 'payment:list-unbilled',
@@ -51,6 +53,10 @@ export const IpcChannels = {
   STORAGE_CONFIRM_RESTORE: 'storage:confirm-restore',
   REPORT_CUSTOMERS_CLOSING_PDF: 'report:customers-closing-pdf',
   REPORT_SHARE_BILL_IMAGE: 'report:share-bill-image',
+  AUTH_GET_STATUS: 'auth:get-status',
+  AUTH_SETUP: 'auth:setup',
+  AUTH_UNLOCK: 'auth:unlock',
+  AUTH_CHANGE_PASSWORD: 'auth:change-password',
 } as const;
 
 export interface CreatePartyRequest {
@@ -165,6 +171,11 @@ export interface GetBillRequest {
   billId: number;
 }
 
+export interface RestoreBillRequest {
+  partyType: PartyType;
+  billId: number;
+}
+
 export interface ShareBillImageRequest {
   partyType: PartyType;
   billId: number;
@@ -173,6 +184,28 @@ export interface ShareBillImageRequest {
 export interface ShareBillImageResponse {
   savedPath: string;
   whatsappUrl: string | null;
+}
+
+// App password (start-up lock). hasPassword false = first run, show the
+// "set a password" screen; unlocked false = show the "enter password" screen.
+export interface AuthStatus {
+  hasPassword: boolean;
+  unlocked: boolean;
+}
+
+export interface SetupPasswordRequest {
+  password: string;
+  confirmPassword: string;
+}
+
+export interface UnlockRequest {
+  password: string;
+}
+
+export interface ChangePasswordRequest {
+  currentPassword: string;
+  newPassword: string;
+  confirmNewPassword: string;
 }
 
 export interface ListAllBillsRequest {
@@ -290,6 +323,10 @@ export interface KhataApi {
   listBillsForParty(req: ListBillsForPartyRequest): Promise<BillListItem[]>;
   getBill(req: GetBillRequest): Promise<BillDetail>;
   listAllBills(req: ListAllBillsRequest): Promise<BillListItem[]>;
+  // Undoes a generated bill: its entries and payments go back to unbilled
+  // (same rows, so original dates and amounts are untouched) and the bill
+  // itself is deleted. The party's due does not change.
+  restoreBill(req: RestoreBillRequest): Promise<RestoreBillResult>;
   recordPayment(req: RecordPaymentRequest): Promise<Payment>;
   listUnbilledPayments(req: ListUnbilledPaymentsRequest): Promise<Payment[]>;
   listPayments(req: ListPaymentsRequest): Promise<Payment[]>;
@@ -325,4 +362,11 @@ export interface KhataApi {
   // WhatsApp themselves - no API exists for a fully offline app to do that
   // last step automatically.
   shareBillImage(req: ShareBillImageRequest): Promise<ShareBillImageResponse>;
+  // App password. getAuthStatus/setupPassword/unlockApp work while the app
+  // is locked; every other method above is refused by the main process
+  // until unlockApp (or setupPassword) has succeeded.
+  getAuthStatus(): Promise<AuthStatus>;
+  setupPassword(req: SetupPasswordRequest): Promise<void>;
+  unlockApp(req: UnlockRequest): Promise<void>;
+  changePassword(req: ChangePasswordRequest): Promise<void>;
 }

@@ -1,4 +1,5 @@
 import { ipcMain } from 'electron';
+import { guardedHandle } from './security/ipcGuard';
 import Database from 'better-sqlite3';
 import { IpcChannels } from '../shared/ipc';
 import type {
@@ -14,6 +15,7 @@ import type {
   GenerateBillRequest,
   ListBillsForPartyRequest,
   GetBillRequest,
+  RestoreBillRequest,
   ListAllBillsRequest,
   RecordPaymentRequest,
   ListPaymentsRequest,
@@ -38,6 +40,7 @@ import {
   getUnbilledEntries,
   getUnbilledPayments,
   generateBill,
+  restoreBill,
   getBillsForParty,
   getBillById,
   recordPayment,
@@ -64,31 +67,31 @@ import {
  * is created.
  */
 export function registerIpcHandlers(db: Database.Database): void {
-  ipcMain.handle(IpcChannels.PARTY_CREATE, (_event, req: CreatePartyRequest) => {
+  guardedHandle(IpcChannels.PARTY_CREATE, (_event, req: CreatePartyRequest) => {
     return createParty(db, req.partyType, req.name, req.contactNumber, req.openingDue ?? 0);
   });
 
-  ipcMain.handle(IpcChannels.PARTY_GET, (_event, req: GetPartyRequest) => {
+  guardedHandle(IpcChannels.PARTY_GET, (_event, req: GetPartyRequest) => {
     return getParty(db, req.partyType, req.partyId);
   });
 
-  ipcMain.handle(IpcChannels.PARTY_LIST, (_event, req: ListPartiesRequest) => {
+  guardedHandle(IpcChannels.PARTY_LIST, (_event, req: ListPartiesRequest) => {
     return getAllParties(db, req.partyType);
   });
 
-  ipcMain.handle(IpcChannels.PARTY_LIST_WITH_ACTIVITY, (_event, req: ListPartiesRequest) => {
+  guardedHandle(IpcChannels.PARTY_LIST_WITH_ACTIVITY, (_event, req: ListPartiesRequest) => {
     return getAllPartiesWithActivity(db, req.partyType);
   });
 
-  ipcMain.handle(IpcChannels.PARTY_DELETE, (_event, req: DeletePartyRequest) => {
+  guardedHandle(IpcChannels.PARTY_DELETE, (_event, req: DeletePartyRequest) => {
     deleteParty(db, req.partyType, req.partyId);
   });
 
-  ipcMain.handle(IpcChannels.PARTY_FORCE_DELETE, (_event, req: ForceDeletePartyRequest) => {
+  guardedHandle(IpcChannels.PARTY_FORCE_DELETE, (_event, req: ForceDeletePartyRequest) => {
     forceDeleteParty(db, req.partyType, req.partyId, req.confirmName);
   });
 
-  ipcMain.handle(IpcChannels.ENTRY_ADD, (_event, req: AddEntryRequest) => {
+  guardedHandle(IpcChannels.ENTRY_ADD, (_event, req: AddEntryRequest) => {
     return addEntry(
       db,
       req.partyType,
@@ -101,27 +104,27 @@ export function registerIpcHandlers(db: Database.Database): void {
     );
   });
 
-  ipcMain.handle(IpcChannels.ENTRY_UPDATE, (_event, req: UpdateEntryRequest) => {
+  guardedHandle(IpcChannels.ENTRY_UPDATE, (_event, req: UpdateEntryRequest) => {
     updateEntry(db, req.partyType, req.partyId, req.entryId, req.itemName, req.weightKg, req.ratePerKg, req.entryDate);
   });
 
-  ipcMain.handle(IpcChannels.ENTRY_DELETE, (_event, req: DeleteEntryRequest) => {
+  guardedHandle(IpcChannels.ENTRY_DELETE, (_event, req: DeleteEntryRequest) => {
     deleteEntry(db, req.partyType, req.partyId, req.entryId);
   });
 
-  ipcMain.handle(IpcChannels.ENTRY_LIST_UNBILLED, (_event, req: ListUnbilledEntriesRequest) => {
+  guardedHandle(IpcChannels.ENTRY_LIST_UNBILLED, (_event, req: ListUnbilledEntriesRequest) => {
     return getUnbilledEntries(db, req.partyType, req.partyId);
   });
 
-  ipcMain.handle(IpcChannels.BILL_GENERATE, (_event, req: GenerateBillRequest) => {
+  guardedHandle(IpcChannels.BILL_GENERATE, (_event, req: GenerateBillRequest) => {
     return generateBill(db, req.partyType, req.partyId, req.entryIds, req.paymentIds, req.confirmDuplicates ?? false);
   });
 
-  ipcMain.handle(IpcChannels.PAYMENT_LIST_UNBILLED, (_event, req: ListUnbilledPaymentsRequest) => {
+  guardedHandle(IpcChannels.PAYMENT_LIST_UNBILLED, (_event, req: ListUnbilledPaymentsRequest) => {
     return getUnbilledPayments(db, req.partyType, req.partyId);
   });
 
-  ipcMain.handle(IpcChannels.PAYMENT_RECORD, (_event, req: RecordPaymentRequest) => {
+  guardedHandle(IpcChannels.PAYMENT_RECORD, (_event, req: RecordPaymentRequest) => {
     return recordPayment(
       db,
       req.partyType,
@@ -134,31 +137,35 @@ export function registerIpcHandlers(db: Database.Database): void {
     );
   });
 
-  ipcMain.handle(IpcChannels.BILL_LIST_FOR_PARTY, (_event, req: ListBillsForPartyRequest) => {
+  guardedHandle(IpcChannels.BILL_LIST_FOR_PARTY, (_event, req: ListBillsForPartyRequest) => {
     return getBillsForParty(db, req.partyType, req.partyId);
   });
 
-  ipcMain.handle(IpcChannels.BILL_GET, (_event, req: GetBillRequest) => {
+  guardedHandle(IpcChannels.BILL_GET, (_event, req: GetBillRequest) => {
     return getBillById(db, req.partyType, req.billId);
   });
 
-  ipcMain.handle(IpcChannels.BILL_LIST_ALL, (_event, req: ListAllBillsRequest) => {
+  guardedHandle(IpcChannels.BILL_RESTORE, (_event, req: RestoreBillRequest) => {
+    return restoreBill(db, req.partyType, req.billId);
+  });
+
+  guardedHandle(IpcChannels.BILL_LIST_ALL, (_event, req: ListAllBillsRequest) => {
     return listAllBills(db, { partyType: req.partyType, fromDate: req.fromDate, toDate: req.toDate });
   });
 
-  ipcMain.handle(IpcChannels.PAYMENT_LIST, (_event, req: ListPaymentsRequest) => {
+  guardedHandle(IpcChannels.PAYMENT_LIST, (_event, req: ListPaymentsRequest) => {
     return getPayments(db, req.partyType, req.partyId);
   });
 
-  ipcMain.handle(IpcChannels.DAILY_LEDGER_CREATE, (_event, req: CreateDailyLedgerRequest) => {
+  guardedHandle(IpcChannels.DAILY_LEDGER_CREATE, (_event, req: CreateDailyLedgerRequest) => {
     return createDailyLedger(db, req.ledgerDate);
   });
 
-  ipcMain.handle(IpcChannels.DAILY_LEDGER_GET, (_event, req: GetDailyLedgerRequest) => {
+  guardedHandle(IpcChannels.DAILY_LEDGER_GET, (_event, req: GetDailyLedgerRequest) => {
     return getDailyLedger(db, req.ledgerDate);
   });
 
-  ipcMain.handle(IpcChannels.DAILY_LEDGER_UPDATE_FIELDS, (_event, req: UpdateDailyLedgerFieldsRequest) => {
+  guardedHandle(IpcChannels.DAILY_LEDGER_UPDATE_FIELDS, (_event, req: UpdateDailyLedgerFieldsRequest) => {
     const hasLiveChickenInput =
       req.liveChickenWeightKg !== undefined || req.liveChickenRate !== undefined || req.liveChickenTotal !== undefined;
     const hasChickenMeatInput =
@@ -178,15 +185,15 @@ export function registerIpcHandlers(db: Database.Database): void {
     });
   });
 
-  ipcMain.handle(IpcChannels.DAILY_LEDGER_SAVE_UDHARS, (_event, req: SaveDailyLedgerUdharsRequest) => {
+  guardedHandle(IpcChannels.DAILY_LEDGER_SAVE_UDHARS, (_event, req: SaveDailyLedgerUdharsRequest) => {
     return saveDailyLedgerUdhars(db, req.ledgerDate, req.udhars);
   });
 
-  ipcMain.handle(IpcChannels.DAILY_LEDGER_LIST, (_event, req: ListDailyLedgersRequest) => {
+  guardedHandle(IpcChannels.DAILY_LEDGER_LIST, (_event, req: ListDailyLedgersRequest) => {
     return listDailyLedgers(db, req.fromDate, req.toDate);
   });
 
-  ipcMain.handle(IpcChannels.DAILY_LEDGER_MONTHLY_SUMMARY, (_event, req: GetMonthlySummaryRequest) => {
+  guardedHandle(IpcChannels.DAILY_LEDGER_MONTHLY_SUMMARY, (_event, req: GetMonthlySummaryRequest) => {
     return getMonthlySummary(db, req.year, req.month);
   });
 }

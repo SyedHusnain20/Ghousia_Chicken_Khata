@@ -1135,3 +1135,50 @@ input:focus, select:focus, button:focus-visible, a:focus-visible, .clickable-row
     margin: 4mm;
   }
 }
+
+
+/* ---------------- Lock screen (start-up password) ---------------- */
+
+.lock-screen {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--color-bg);
+}
+
+.lock-card {
+  width: 100%;
+  max-width: 380px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-md);
+  padding: 32px 30px;
+  text-align: center;
+}
+
+.lock-icon {
+  font-size: 34px;
+  line-height: 1;
+  margin-bottom: 10px;
+}
+
+.lock-subtitle {
+  color: var(--color-text-muted);
+  font-size: 14px;
+  margin: 6px 0 22px;
+}
+
+.lock-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  text-align: left;
+}
+
+.lock-submit {
+  width: 100%;
+  padding: 12px 18px;
+}

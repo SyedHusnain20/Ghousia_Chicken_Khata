@@ -1,5 +1,6 @@
 import { el, mount } from '../dom';
-import { button, confirmDialog, errorBanner, errorMessage, loadingState, pageHeader } from '../components';
+import { button, confirmDialog, errorBanner, errorMessage, ipcErrorMessage, loadingState, pageHeader } from '../components';
+import { MIN_PASSWORD_LENGTH } from './lockScreen';
 import type { StorageInfo, SnapshotInfo } from '../../shared/ipc';
 
 function formatBytes(bytes: number): string {
@@ -86,6 +87,70 @@ function restorePanel(onRestore: () => void): HTMLElement {
   ]);
 }
 
+function passwordPanel(): HTMLElement {
+  const passwordInput = (autocomplete: 'current-password' | 'new-password') =>
+    el('input', { type: 'password', autocomplete, spellcheck: 'false' }) as HTMLInputElement;
+
+  const currentInput = passwordInput('current-password');
+  const newInput = passwordInput('new-password');
+  const confirmInput = passwordInput('new-password');
+  const statusSlot = el('div', { class: 'form-error-slot' });
+  const submitBtn = el('button', { class: 'btn btn-primary', type: 'submit' }, ['Change Password']) as HTMLButtonElement;
+
+  const form = el('form', {}, [
+    el('div', { class: 'form-grid form-grid-tight' }, [
+      el('label', {}, ['Current password', currentInput]),
+      el('label', {}, ['New password', newInput]),
+      el('label', {}, ['Confirm new password', confirmInput]),
+    ]),
+    statusSlot,
+    el('div', { class: 'form-actions' }, [submitBtn]),
+  ]);
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    statusSlot.replaceChildren();
+
+    if (currentInput.value.length === 0) {
+      statusSlot.append(errorBanner('Please enter your current password.'));
+      return;
+    }
+    if (newInput.value.length < MIN_PASSWORD_LENGTH) {
+      statusSlot.append(errorBanner(`The new password must be at least ${MIN_PASSWORD_LENGTH} characters long.`));
+      return;
+    }
+    if (newInput.value !== confirmInput.value) {
+      statusSlot.append(errorBanner('The new password and its confirmation don\u2019t match.'));
+      return;
+    }
+
+    submitBtn.disabled = true;
+    try {
+      await window.khata.changePassword({
+        currentPassword: currentInput.value,
+        newPassword: newInput.value,
+        confirmNewPassword: confirmInput.value,
+      });
+      currentInput.value = '';
+      newInput.value = '';
+      confirmInput.value = '';
+      statusSlot.append(successBanner('Password changed. Use the new password the next time you open the app.'));
+    } catch (err) {
+      statusSlot.append(errorBanner(ipcErrorMessage(err)));
+    } finally {
+      submitBtn.disabled = false;
+    }
+  });
+
+  return el('section', { class: 'panel' }, [
+    el('div', { class: 'panel-header-row' }, [el('h2', {}, ['App Password'])]),
+    el('p', { class: 'field-hint' }, [
+      `The password is asked each time the app is opened \u2014 not when you minimize it or switch to another window. Use at least ${MIN_PASSWORD_LENGTH} characters.`,
+    ]),
+    form,
+  ]);
+}
+
 export async function renderSettings(container: HTMLElement): Promise<void> {
   mount(container, pageHeader('Settings / Backup'), loadingState('Loading storage info...'));
 
@@ -108,6 +173,7 @@ export async function renderSettings(container: HTMLElement): Promise<void> {
       locationPanel(info, handleChangeLocation, handleOpenFolder),
       snapshotsPanel(info.snapshots, handleCreateSnapshot, creatingSnapshot),
       restorePanel(handleRestore),
+      passwordPanel(),
     ];
     mount(container, ...parts);
   }

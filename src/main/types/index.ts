@@ -65,6 +65,16 @@ export interface BillDetail extends Bill {
   party_contact: string | null;
 }
 
+// What restoreBill reports back: which party the bill belonged to (so the UI
+// can send the shopkeeper to their profile) and how many rows went back to
+// being unbilled.
+export interface RestoreBillResult {
+  partyId: number;
+  partyName: string;
+  entriesRestored: number;
+  paymentsRestored: number;
+}
+
 export interface Payment {
   id: number;
   party_type: PartyType;

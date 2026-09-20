@@ -24,6 +24,7 @@ const IpcChannels = {
   BILL_LIST_FOR_PARTY: 'bill:list-for-party',
   BILL_GET: 'bill:get',
   BILL_LIST_ALL: 'bill:list-all',
+  BILL_RESTORE: 'bill:restore',
   PAYMENT_RECORD: 'payment:record',
   PAYMENT_LIST: 'payment:list',
   PAYMENT_LIST_UNBILLED: 'payment:list-unbilled',
@@ -42,6 +43,10 @@ const IpcChannels = {
   STORAGE_CONFIRM_RESTORE: 'storage:confirm-restore',
   REPORT_CUSTOMERS_CLOSING_PDF: 'report:customers-closing-pdf',
   REPORT_SHARE_BILL_IMAGE: 'report:share-bill-image',
+  AUTH_GET_STATUS: 'auth:get-status',
+  AUTH_SETUP: 'auth:setup',
+  AUTH_UNLOCK: 'auth:unlock',
+  AUTH_CHANGE_PASSWORD: 'auth:change-password',
 } as const;
 
 // This is the ONLY thing the renderer can touch. No direct ipcRenderer
@@ -63,6 +68,7 @@ const khataApi: KhataApi = {
   listBillsForParty: (req) => ipcRenderer.invoke(IpcChannels.BILL_LIST_FOR_PARTY, req),
   getBill: (req) => ipcRenderer.invoke(IpcChannels.BILL_GET, req),
   listAllBills: (req) => ipcRenderer.invoke(IpcChannels.BILL_LIST_ALL, req),
+  restoreBill: (req) => ipcRenderer.invoke(IpcChannels.BILL_RESTORE, req),
   recordPayment: (req) => ipcRenderer.invoke(IpcChannels.PAYMENT_RECORD, req),
   listPayments: (req) => ipcRenderer.invoke(IpcChannels.PAYMENT_LIST, req),
   listUnbilledPayments: (req) => ipcRenderer.invoke(IpcChannels.PAYMENT_LIST_UNBILLED, req),
@@ -81,6 +87,10 @@ const khataApi: KhataApi = {
   confirmRestore: (req) => ipcRenderer.invoke(IpcChannels.STORAGE_CONFIRM_RESTORE, req),
   generateCustomersClosingPdf: () => ipcRenderer.invoke(IpcChannels.REPORT_CUSTOMERS_CLOSING_PDF),
   shareBillImage: (req) => ipcRenderer.invoke(IpcChannels.REPORT_SHARE_BILL_IMAGE, req),
+  getAuthStatus: () => ipcRenderer.invoke(IpcChannels.AUTH_GET_STATUS),
+  setupPassword: (req) => ipcRenderer.invoke(IpcChannels.AUTH_SETUP, req),
+  unlockApp: (req) => ipcRenderer.invoke(IpcChannels.AUTH_UNLOCK, req),
+  changePassword: (req) => ipcRenderer.invoke(IpcChannels.AUTH_CHANGE_PASSWORD, req),
 };
 
 contextBridge.exposeInMainWorld('khata', khataApi);

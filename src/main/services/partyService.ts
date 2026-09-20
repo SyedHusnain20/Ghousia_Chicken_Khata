@@ -1,5 +1,16 @@
 import Database from 'better-sqlite3';
-import { PartyType, Party, PartyWithActivity, Entry, Bill, BillListItem, BillDetail, Payment, PaymentMethod } from '../types';
+import {
+  PartyType,
+  Party,
+  PartyWithActivity,
+  Entry,
+  Bill,
+  BillListItem,
+  BillDetail,
+  RestoreBillResult,
+  Payment,
+  PaymentMethod,
+} from '../types';
 
 // Table names differ by party type but the logic is identical, so we
 // resolve table names once per call rather than duplicating every function.
@@ -506,6 +517,60 @@ export function generateBill(
       items,
       payments,
     } as Bill;
+  });
+
+  return run();
+}
+
+/**
+ * Undoes a generated bill: every entry and payment that was locked into it
+ * goes back to being unbilled, and the bill record itself is deleted - so
+ * the shopkeeper can fix a mistake (edit/delete an entry, add a missing
+ * one) and generate a fresh bill afterwards.
+ *
+ * Nothing is re-created or recalculated - the very same entry and payment
+ * rows are simply un-linked (bill_id set back to NULL). That's what
+ * guarantees their original dates (entry_date / paid_at), amounts, items,
+ * weights and rates come back exactly as they were.
+ *
+ * The party's current_due is deliberately NOT touched: it already includes
+ * every entry and payment (it's updated the moment each is logged - billing
+ * is purely documentation, see generateBill), so restoring a bill changes
+ * only which pile the rows sit in, never what the party owes. Generating a
+ * new bill afterwards recomputes previous_due from current_due and the
+ * unbilled rows, which lands on the same number the deleted bill had (if
+ * nothing else changed in between).
+ *
+ * The entries are un-linked BEFORE the bill row is deleted - the entries
+ * table has a foreign key to the bills table, so deleting the bill first
+ * would be rejected. Everything runs in one transaction, so a failure part
+ * way leaves the bill fully intact rather than half-restored.
+ */
+export function restoreBill(db: Database.Database, partyType: PartyType, billId: number): RestoreBillResult {
+  const t = tables(partyType);
+
+  const run = db.transaction(() => {
+    const bill = db.prepare(`SELECT * FROM ${t.bills} WHERE id = ?`).get(billId) as
+      | (Record<string, unknown> & { id: number })
+      | undefined;
+    if (!bill) throw new Error(`${partyType} bill ${billId} not found - it may already have been restored`);
+
+    const partyId = bill[t.fk] as number;
+    const party = getParty(db, partyType, partyId);
+
+    const entriesResult = db.prepare(`UPDATE ${t.entries} SET bill_id = NULL WHERE bill_id = ?`).run(billId);
+    const paymentsResult = db
+      .prepare(`UPDATE payments SET bill_id = NULL WHERE party_type = ? AND bill_id = ?`)
+      .run(partyType, billId);
+
+    db.prepare(`DELETE FROM ${t.bills} WHERE id = ?`).run(billId);
+
+    return {
+      partyId,
+      partyName: party.name,
+      entriesRestored: Number(entriesResult.changes),
+      paymentsRestored: Number(paymentsResult.changes),
+    };
   });
 
   return run();

@@ -8,6 +8,9 @@ import { registerStorageIpcHandlers } from './storageIpcHandlers';
 import { registerReportIpcHandlers } from './reportsIpcHandlers';
 import { detectOneDrivePath, resolveStorageFolder, saveStorageFolder, dbFilePathFor } from './storage/storageLocation';
 import { ensureMonthlySnapshot } from './backup/snapshotService';
+import { AppLock } from './security/appLock';
+import { setUnlockCheck } from './security/ipcGuard';
+import { registerAuthIpcHandlers } from './authIpcHandlers';
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -102,6 +105,15 @@ function createWindow(): void {
 }
 
 app.whenReady().then(async () => {
+  // The start-up password. Its "unlocked" state lives only in this process's
+  // memory, so it starts locked on every launch (after closing the app, or
+  // after the laptop is turned on) but stays unlocked through minimizing,
+  // window switching and page reloads. The hash is kept in this laptop's
+  // own app-data folder - never in the database or the synced backup folder.
+  const appLock = new AppLock(path.join(app.getPath('userData'), 'app-lock.json'));
+  setUnlockCheck(() => appLock.isUnlocked());
+  registerAuthIpcHandlers(appLock);
+
   const resolved = resolveStorageFolder();
   dbFolderPath = resolved.dbFolderPath;
 
