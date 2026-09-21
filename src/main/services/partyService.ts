@@ -620,6 +620,93 @@ export function recordPayment(
 }
 
 /**
+ * Edits an existing payment - but only while it's still unbilled, the same
+ * rule updateEntry follows. A payment that's been put on a bill is part of
+ * that bill's snapshot (a copy may already be printed or on WhatsApp), so
+ * it stays fixed unless the bill is restored first.
+ *
+ * A payment reduces the party's due, so the due is adjusted by the
+ * difference (old amount - new amount) rather than recalculated from
+ * scratch - correct even if other entries/payments have been logged or
+ * billed since. Only the amount, method and calendar date are editable;
+ * like updateEntry, the original time-of-day is kept so editing never
+ * rewrites when the payment was actually recorded.
+ */
+export function updatePayment(
+  db: Database.Database,
+  partyType: PartyType,
+  partyId: number,
+  paymentId: number,
+  amount: number,
+  paymentMethod: PaymentMethod | null,
+  paymentDate?: string
+): void {
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new Error('Payment amount must be a number greater than zero');
+  }
+  if (paymentDate !== undefined && !DATE_ONLY_RE.test(paymentDate)) {
+    throw new Error("paymentDate must be in 'YYYY-MM-DD' format");
+  }
+  if (paymentMethod !== null && paymentMethod !== 'cash' && paymentMethod !== 'online') {
+    throw new Error("Payment method must be 'cash' or 'online'");
+  }
+  const newAmount = floorMoney(amount);
+  if (newAmount <= 0) {
+    throw new Error('Payment amount must be at least Rs. 1');
+  }
+  const t = tables(partyType);
+
+  db.transaction(() => {
+    const existing = db
+      .prepare('SELECT * FROM payments WHERE id = ? AND party_type = ? AND party_id = ?')
+      .get(paymentId, partyType, partyId) as Payment | undefined;
+    if (!existing) throw new Error('Payment not found');
+    if (existing.bill_id !== null) {
+      throw new Error('This payment has already been billed and can no longer be edited');
+    }
+
+    const existingTime = existing.paid_at.split(' ')[1] ?? pakistanNow().time;
+    const newPaidAt = paymentDate !== undefined ? `${paymentDate} ${existingTime}` : existing.paid_at;
+
+    db.prepare('UPDATE payments SET amount = ?, payment_method = ?, paid_at = ? WHERE id = ?').run(
+      newAmount,
+      paymentMethod,
+      newPaidAt,
+      paymentId
+    );
+
+    const party = getParty(db, partyType, partyId);
+    const newDue = floorMoney(party.current_due + existing.amount - newAmount);
+    db.prepare(`UPDATE ${t.party} SET current_due = ? WHERE id = ?`).run(newDue, partyId);
+  })();
+}
+
+/**
+ * Deletes a payment - but only while it's still unbilled, same rule as
+ * updatePayment. Puts the amount back onto the party's due (the exact
+ * opposite of what recordPayment did when it was logged).
+ */
+export function deletePayment(db: Database.Database, partyType: PartyType, partyId: number, paymentId: number): void {
+  const t = tables(partyType);
+
+  db.transaction(() => {
+    const existing = db
+      .prepare('SELECT * FROM payments WHERE id = ? AND party_type = ? AND party_id = ?')
+      .get(paymentId, partyType, partyId) as Payment | undefined;
+    if (!existing) throw new Error('Payment not found');
+    if (existing.bill_id !== null) {
+      throw new Error('This payment has already been billed and can no longer be deleted');
+    }
+
+    db.prepare('DELETE FROM payments WHERE id = ?').run(paymentId);
+
+    const party = getParty(db, partyType, partyId);
+    const newDue = floorMoney(party.current_due + existing.amount);
+    db.prepare(`UPDATE ${t.party} SET current_due = ? WHERE id = ?`).run(newDue, partyId);
+  })();
+}
+
+/**
  * Full payment history for a party, most recent first - backs the
  * "Payment history" list on the Supplier/Customer profile screen. Includes
  * both standalone payments (bill_id NULL) and payments recorded at bill

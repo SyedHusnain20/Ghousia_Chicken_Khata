@@ -8,6 +8,7 @@
   "scripts": {
     "test:scenario": "ts-node test/scenario.ts",
     "test:restore-bill": "ts-node test/restoreBill.ts",
+    "test:payment-edit": "ts-node test/paymentEdit.ts",
     "test:app-lock": "ts-node test/appLock.ts",
     "test:ipc-lock": "ts-node test/ipcLock.ts",
     "build:main": "tsc && node scripts/copy-assets.js",

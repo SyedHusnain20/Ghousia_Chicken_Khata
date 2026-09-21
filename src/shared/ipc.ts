@@ -36,6 +36,8 @@ export const IpcChannels = {
   BILL_LIST_ALL: 'bill:list-all',
   BILL_RESTORE: 'bill:restore',
   PAYMENT_RECORD: 'payment:record',
+  PAYMENT_UPDATE: 'payment:update',
+  PAYMENT_DELETE: 'payment:delete',
   PAYMENT_LIST: 'payment:list',
   PAYMENT_LIST_UNBILLED: 'payment:list-unbilled',
   DAILY_LEDGER_CREATE: 'daily-ledger:create',
@@ -154,6 +156,21 @@ export interface RecordPaymentRequest {
   note?: string | null;
   paymentMethod?: PaymentMethod | null;
   paymentDate?: string; // 'YYYY-MM-DD' - omit to use today
+}
+
+export interface UpdatePaymentRequest {
+  partyType: PartyType;
+  partyId: number;
+  paymentId: number;
+  amount: number;
+  paymentMethod: PaymentMethod | null;
+  paymentDate?: string; // 'YYYY-MM-DD' - omit to leave the date unchanged
+}
+
+export interface DeletePaymentRequest {
+  partyType: PartyType;
+  partyId: number;
+  paymentId: number;
 }
 
 export interface ListPaymentsRequest {
@@ -328,6 +345,10 @@ export interface KhataApi {
   // itself is deleted. The party's due does not change.
   restoreBill(req: RestoreBillRequest): Promise<RestoreBillResult>;
   recordPayment(req: RecordPaymentRequest): Promise<Payment>;
+  // Fix a mistake in a payment - only while it is unbilled (restore its
+  // bill first otherwise). The party's due is adjusted to match.
+  updatePayment(req: UpdatePaymentRequest): Promise<void>;
+  deletePayment(req: DeletePaymentRequest): Promise<void>;
   listUnbilledPayments(req: ListUnbilledPaymentsRequest): Promise<Payment[]>;
   listPayments(req: ListPaymentsRequest): Promise<Payment[]>;
   createDailyLedger(req: CreateDailyLedgerRequest): Promise<DailyLedger>;

@@ -575,16 +575,88 @@ function billsTable(bills: BillListItem[], partyType: PartyType): HTMLElement {
 // stays unbilled for a later one.
 const PAYMENT_METHOD_LABEL: Record<string, string> = { cash: 'Cash', online: 'Online' };
 
+function paymentEditRow(
+  payment: Payment,
+  partyType: PartyType,
+  partyId: number,
+  onDone: (changed: boolean) => void
+): HTMLElement {
+  const dateInput = el('input', { type: 'date', value: payment.paid_at.split(' ')[0] }) as HTMLInputElement;
+  // Payments recorded before the method field existed have none - keep a
+  // blank choice for those so saving an edit doesn't force a made-up value.
+  const methodSelect = el('select', {}, [
+    payment.payment_method === null ? el('option', { value: '' }, ['\u2014']) : null,
+    el('option', { value: 'cash' }, ['Cash']),
+    el('option', { value: 'online' }, ['Online']),
+  ]) as HTMLSelectElement;
+  methodSelect.value = payment.payment_method ?? '';
+  const amountInput = el('input', {
+    type: 'number',
+    step: '0.01',
+    min: '0.01',
+    value: String(payment.amount),
+  }) as HTMLInputElement;
+
+  const errorSlot = el('div', { class: 'form-error-slot' });
+  const saveBtn = el('button', { class: 'btn btn-primary btn-small', type: 'button' }, ['Save']) as HTMLButtonElement;
+  const cancelBtn = el('button', { class: 'btn btn-secondary btn-small', type: 'button' }, ['Cancel']);
+
+  cancelBtn.addEventListener('click', () => onDone(false));
+
+  saveBtn.addEventListener('click', async () => {
+    errorSlot.replaceChildren();
+
+    const amount = Number(amountInput.value);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      errorSlot.append(errorBanner('Payment amount must be a positive number.'));
+      return;
+    }
+    if (!dateInput.value) {
+      errorSlot.append(errorBanner('Date is required.'));
+      return;
+    }
+
+    saveBtn.disabled = true;
+    try {
+      await window.khata.updatePayment({
+        partyType,
+        partyId,
+        paymentId: payment.id,
+        amount,
+        paymentMethod: methodSelect.value === '' ? null : (methodSelect.value as 'cash' | 'online'),
+        paymentDate: dateInput.value,
+      });
+      onDone(true);
+    } catch (err) {
+      errorSlot.replaceChildren(errorBanner(errorMessage(err)));
+      saveBtn.disabled = false;
+    }
+  });
+
+  return el('tr', { class: 'entry-edit-row' }, [
+    el('td', {}, [el('input', { type: 'checkbox', disabled: 'true' })]),
+    el('td', {}, [dateInput]),
+    el('td', {}, [methodSelect]),
+    el('td', {}, [amountInput]),
+    el('td', { class: 'cell-actions' }, [el('div', { class: 'entry-edit-actions' }, [saveBtn, cancelBtn]), errorSlot]),
+  ]);
+}
+
 function renderPaymentsUnbilledTable(
   wrap: HTMLElement,
   payments: Payment[],
+  partyType: PartyType,
+  partyId: number,
   selectedIds: Set<number>,
-  onSelectionChange: () => void
+  onSelectionChange: () => void,
+  onChanged: () => void
 ): void {
   if (payments.length === 0) {
     mount(wrap, emptyState('No unbilled payments.'));
     return;
   }
+
+  let editingId: number | null = null;
 
   function render() {
     const selectAllCheckbox = el('input', { type: 'checkbox' }) as HTMLInputElement;
@@ -600,6 +672,17 @@ function renderPaymentsUnbilledTable(
     });
 
     const rows = payments.map((payment) => {
+      if (payment.id === editingId) {
+        return paymentEditRow(payment, partyType, partyId, (changed) => {
+          editingId = null;
+          if (changed) {
+            onChanged();
+          } else {
+            render();
+          }
+        });
+      }
+
       const rowCheckbox = el('input', { type: 'checkbox' }) as HTMLInputElement;
       rowCheckbox.checked = selectedIds.has(payment.id);
       rowCheckbox.addEventListener('change', () => {
@@ -609,11 +692,38 @@ function renderPaymentsUnbilledTable(
         onSelectionChange();
       });
 
+      const editBtn = el('button', { class: 'btn btn-secondary btn-small', type: 'button' }, ['Edit']);
+      editBtn.addEventListener('click', () => {
+        editingId = payment.id;
+        render();
+      });
+
+      const deleteBtn = el('button', { class: 'btn btn-danger btn-small', type: 'button' }, ['Delete']) as HTMLButtonElement;
+      const rowErrorSlot = el('div', { class: 'form-error-slot' });
+      deleteBtn.addEventListener('click', async () => {
+        const confirmed = await confirmDialog(
+          `Delete this ${payment.payment_method ? PAYMENT_METHOD_LABEL[payment.payment_method].toLowerCase() + ' ' : ''}payment of ${formatRs(payment.amount)}? ` +
+            `That amount will be added back to the due. This can\u2019t be undone.`,
+          { confirmLabel: 'Delete', danger: true }
+        );
+        if (!confirmed) return;
+        deleteBtn.disabled = true;
+        rowErrorSlot.replaceChildren();
+        try {
+          await window.khata.deletePayment({ partyType, partyId, paymentId: payment.id });
+          onChanged();
+        } catch (err) {
+          rowErrorSlot.replaceChildren(errorBanner(errorMessage(err)));
+          deleteBtn.disabled = false;
+        }
+      });
+
       return el('tr', {}, [
         el('td', {}, [rowCheckbox]),
         el('td', {}, [formatDateTime(payment.paid_at)]),
         el('td', { class: 'cell-muted' }, [payment.payment_method ? PAYMENT_METHOD_LABEL[payment.payment_method] : '\u2014']),
         el('td', { class: 'cell-number cell-strong' }, [formatRs(payment.amount)]),
+        el('td', { class: 'cell-actions' }, [el('div', { class: 'entry-edit-actions' }, [editBtn, deleteBtn]), rowErrorSlot]),
       ]);
     });
 
@@ -627,6 +737,7 @@ function renderPaymentsUnbilledTable(
             el('th', {}, ['Date']),
             el('th', {}, ['Method']),
             el('th', { class: 'th-right' }, ['Amount']),
+            el('th', {}, ['']),
           ]),
         ]),
         el('tbody', {}, rows),
@@ -634,6 +745,7 @@ function renderPaymentsUnbilledTable(
           el('tr', {}, [
             el('td', { colspan: '3' }, ['Unbilled payments total']),
             el('td', { class: 'cell-number cell-strong' }, [formatRs(total)]),
+            el('td', {}, []),
           ]),
         ]),
       ])
@@ -821,7 +933,15 @@ export async function renderPartyProfile(
   function refreshStatic() {
     mount(heroWrap, dueHero(party, partyType));
     renderEntriesTable(entriesWrap, entries, partyType, partyId, selectedEntryIds, renderBillPanel, reload);
-    renderPaymentsUnbilledTable(unbilledPaymentsWrap, unbilledPayments, selectedPaymentIds, renderBillPanel);
+    renderPaymentsUnbilledTable(
+      unbilledPaymentsWrap,
+      unbilledPayments,
+      partyType,
+      partyId,
+      selectedPaymentIds,
+      renderBillPanel,
+      reload
+    );
     mount(paymentsWrap, paymentsTable(payments));
     mount(billsWrap, billsTable(bills, partyType));
     renderBillPanel();

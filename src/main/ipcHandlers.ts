@@ -18,6 +18,8 @@ import type {
   RestoreBillRequest,
   ListAllBillsRequest,
   RecordPaymentRequest,
+  UpdatePaymentRequest,
+  DeletePaymentRequest,
   ListPaymentsRequest,
   ListUnbilledPaymentsRequest,
   CreateDailyLedgerRequest,
@@ -44,6 +46,8 @@ import {
   getBillsForParty,
   getBillById,
   recordPayment,
+  updatePayment,
+  deletePayment,
   getPayments,
 } from './services/partyService';
 import { listAllBills } from './services/billService';
@@ -151,6 +155,14 @@ export function registerIpcHandlers(db: Database.Database): void {
 
   guardedHandle(IpcChannels.BILL_LIST_ALL, (_event, req: ListAllBillsRequest) => {
     return listAllBills(db, { partyType: req.partyType, fromDate: req.fromDate, toDate: req.toDate });
+  });
+
+  guardedHandle(IpcChannels.PAYMENT_UPDATE, (_event, req: UpdatePaymentRequest) => {
+    updatePayment(db, req.partyType, req.partyId, req.paymentId, req.amount, req.paymentMethod, req.paymentDate);
+  });
+
+  guardedHandle(IpcChannels.PAYMENT_DELETE, (_event, req: DeletePaymentRequest) => {
+    deletePayment(db, req.partyType, req.partyId, req.paymentId);
   });
 
   guardedHandle(IpcChannels.PAYMENT_LIST, (_event, req: ListPaymentsRequest) => {

@@ -691,7 +691,8 @@ input:focus, select:focus, button:focus-visible, a:focus-visible, .clickable-row
   padding-bottom: 8px;
 }
 
-.entry-edit-row input {
+.entry-edit-row input,
+.entry-edit-row select {
   width: 100%;
   font-family: var(--font-body);
   font-size: 14px;
