@@ -2,6 +2,7 @@ import { el, mount } from '../dom';
 import { formatDate, formatDue } from '../format';
 import { button, emptyState, errorBanner, errorMessage, loadingState, pageHeader, successBanner } from '../components';
 import { navigate } from '../router';
+import { isCustomerLike, partyProfilePath } from '../partyPaths';
 import type { Party, PartyType, PartyWithActivity } from '../../main/types';
 
 const COPY: Record<PartyType, { title: string; singular: string; addLabel: string; dueLabel: string; contactHint: string }> = {
@@ -23,6 +24,13 @@ const COPY: Record<PartyType, { title: string; singular: string; addLabel: strin
     title: 'Customers / Khata',
     singular: 'customer',
     addLabel: 'Add Customer',
+    dueLabel: 'Owes you',
+    contactHint: 'e.g. 0300-1234567',
+  },
+  waste_customer: {
+    title: 'Waste Customers',
+    singular: 'waste customer',
+    addLabel: 'Add Waste Customer',
     dueLabel: 'Owes you',
     contactHint: 'e.g. 0300-1234567',
   },
@@ -54,7 +62,7 @@ function renderTable(
       el('td', { class: 'cell-muted' }, [party.contact_number || '\u2014']),
       el('td', { class: `cell-amount cell-${due.kind}` }, [due.text]),
     ]);
-    const go = () => navigate(`/${partyType}s/${party.id}`);
+    const go = () => navigate(partyProfilePath(partyType, party.id));
     row.addEventListener('click', go);
     row.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' || e.key === ' ') go();
@@ -110,7 +118,7 @@ function sortCustomers(customers: PartyWithActivity[], mode: CustomerSortMode): 
   return sorted;
 }
 
-function customerRow(customer: PartyWithActivity): HTMLElement {
+function customerRow(customer: PartyWithActivity, partyType: PartyType): HTMLElement {
   const due = formatDue(customer.current_due);
   const lastPurchase = customer.last_purchase_date ? formatDate(customer.last_purchase_date) : 'Never';
   const row = el('tr', { class: 'clickable-row', tabindex: '0' }, [
@@ -119,7 +127,7 @@ function customerRow(customer: PartyWithActivity): HTMLElement {
     el('td', { class: 'cell-muted' }, [lastPurchase]),
     el('td', { class: `cell-amount cell-${due.kind}` }, [due.text]),
   ]);
-  const go = () => navigate(`/customers/${customer.id}`);
+  const go = () => navigate(partyProfilePath(partyType, customer.id));
   row.addEventListener('click', go);
   row.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' || e.key === ' ') go();
@@ -127,7 +135,7 @@ function customerRow(customer: PartyWithActivity): HTMLElement {
   return row;
 }
 
-function customerTable(customers: PartyWithActivity[], emptyMessage: string): HTMLElement {
+function customerTable(customers: PartyWithActivity[], partyType: PartyType, emptyMessage: string): HTMLElement {
   if (customers.length === 0) {
     return emptyState(emptyMessage);
   }
@@ -140,31 +148,34 @@ function customerTable(customers: PartyWithActivity[], emptyMessage: string): HT
         el('th', { class: 'th-right' }, ['Owes you']),
       ]),
     ]),
-    el('tbody', {}, customers.map(customerRow)),
+    el('tbody', {}, customers.map((c) => customerRow(c, partyType))),
   ]);
 }
 
 function renderCustomerLists(
   container: HTMLElement,
   customers: PartyWithActivity[],
+  partyType: PartyType,
   sortMode: CustomerSortMode
 ): void {
   if (customers.length === 0) {
-    mount(container, emptyState(`No customers yet. Use "Add Customer" to add one.`));
+    mount(container, emptyState(`No ${COPY[partyType].singular}s yet. Use "${COPY[partyType].addLabel}" to add one.`));
     return;
   }
 
   const inactiveWithBalance = customers.filter((c) => c.current_due !== 0 && isInactive(c));
   const regular = customers.filter((c) => !(c.current_due !== 0 && isInactive(c)));
 
-  const sections: HTMLElement[] = [customerTable(sortCustomers(regular, sortMode), 'No customers match.')];
+  const sections: HTMLElement[] = [
+    customerTable(sortCustomers(regular, sortMode), partyType, `No ${COPY[partyType].singular}s match.`),
+  ];
 
   if (inactiveWithBalance.length > 0) {
     sections.push(
       el('div', { class: 'section-heading' }, [
         `Inactive \u2014 Balance Due (no purchase in ${INACTIVE_DAYS_THRESHOLD}+ days)`,
       ]),
-      customerTable(sortCustomers(inactiveWithBalance, sortMode), '')
+      customerTable(sortCustomers(inactiveWithBalance, sortMode), partyType, '')
     );
   }
 
@@ -246,7 +257,7 @@ export async function renderPartyList(partyType: PartyType, container: HTMLEleme
   let parties: Party[] = [];
   let customers: PartyWithActivity[] = [];
   try {
-    if (partyType === 'customer') {
+    if (isCustomerLike(partyType)) {
       customers = await window.khata.listPartiesWithActivity({ partyType });
     } else {
       parties = await window.khata.listParties({ partyType });
@@ -278,13 +289,13 @@ export async function renderPartyList(partyType: PartyType, container: HTMLEleme
 
   function renderFiltered() {
     const term = searchTerm.trim().toLowerCase();
-    if (partyType === 'customer') {
+    if (isCustomerLike(partyType)) {
       const filtered = term
         ? customers.filter(
             (p) => p.name.toLowerCase().includes(term) || (p.contact_number ?? '').toLowerCase().includes(term)
           )
         : customers;
-      renderCustomerLists(tableWrap, filtered, sortMode);
+      renderCustomerLists(tableWrap, filtered, partyType, sortMode);
     } else {
       const filtered = term
         ? parties.filter(
@@ -296,7 +307,7 @@ export async function renderPartyList(partyType: PartyType, container: HTMLEleme
   }
 
   async function refetch() {
-    if (partyType === 'customer') {
+    if (isCustomerLike(partyType)) {
       customers = await window.khata.listPartiesWithActivity({ partyType });
     } else {
       parties = await window.khata.listParties({ partyType });
@@ -340,6 +351,8 @@ export async function renderPartyList(partyType: PartyType, container: HTMLEleme
 
   const headerActions = [addBtn];
 
+  // The Closing PDF lists Khata customers only (waste customers are a
+  // separate account book), so the button stays on the Customers page.
   if (partyType === 'customer') {
     const closingBtn = button('Closing', async () => {
       if (closingBusy) return;
@@ -366,7 +379,7 @@ export async function renderPartyList(partyType: PartyType, container: HTMLEleme
   }
 
   const toolbarChildren: HTMLElement[] = [searchInput];
-  if (partyType === 'customer') toolbarChildren.push(sortSelect);
+  if (isCustomerLike(partyType)) toolbarChildren.push(sortSelect);
 
   mount(
     container,

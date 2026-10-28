@@ -667,6 +667,21 @@ export async function renderDailyLedger(ledgerDate: string, container: HTMLEleme
           totalLine('Total Income', detail.total_income, true),
         ]),
       ]),
+      // Waste customers sit in their own panel, outside Expenses/Income,
+      // because their sales are NOT part of the day's profit or loss. The
+      // total shown here is theirs alone and is never added to Total Income.
+      el('section', { class: 'panel' }, [
+        el('h2', {}, ['Waste Customers']),
+        el('p', { class: 'field-hint' }, [
+          'Waste sales are tracked separately \u2014 they are not included in Total Income, Total Expenses, or the Daily Result above.',
+        ]),
+        partyEntriesTable(
+          detail.waste_sales,
+          'Waste Customer',
+          'Waste Total',
+          'No waste customer sales recorded for this date.'
+        ),
+      ]),
       el('section', { class: 'panel' }, [
         el('h2', {}, ['Extra Expenses & Sale']),
         saleAndExpensesForm(ledgerDate, detail.extra_expenses, detail.sale_income, load),

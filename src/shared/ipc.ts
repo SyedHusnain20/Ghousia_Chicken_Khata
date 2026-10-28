@@ -13,6 +13,7 @@ import {
   DailyLedgerDetail,
   DailyLedgerSummary,
   LedgerUdhar,
+  WeightRangeReport,
 } from '../main/types';
 import type { SnapshotInfo } from '../main/backup/snapshotService';
 export type { SnapshotInfo };
@@ -24,6 +25,7 @@ export const IpcChannels = {
   PARTY_GET: 'party:get',
   PARTY_LIST: 'party:list',
   PARTY_LIST_WITH_ACTIVITY: 'party:list-with-activity',
+  PARTY_WEIGHT_RANGE: 'party:weight-range',
   PARTY_DELETE: 'party:delete',
   PARTY_FORCE_DELETE: 'party:force-delete',
   ENTRY_ADD: 'entry:add',
@@ -279,6 +281,16 @@ export interface MonthlySummary {
   total_income: number;
   total_expenses: number;
   total_profit_loss: number;
+  total_waste: number; // waste customers' own total for the month - NOT part of the profit/loss above
+}
+
+// "Total KG bought" view: every purchase between two dates (inclusive) and
+// their exact total weight. fromDate/toDate are 'YYYY-MM-DD'.
+export interface GetWeightRangeRequest {
+  partyType: PartyType;
+  partyId: number;
+  fromDate: string;
+  toDate: string;
 }
 
 export interface StorageInfo {
@@ -357,6 +369,7 @@ export interface KhataApi {
   saveDailyLedgerUdhars(req: SaveDailyLedgerUdharsRequest): Promise<LedgerUdhar[]>;
   listDailyLedgers(req: ListDailyLedgersRequest): Promise<DailyLedgerSummary[]>;
   getMonthlySummary(req: GetMonthlySummaryRequest): Promise<MonthlySummary>;
+  getWeightInDateRange(req: GetWeightRangeRequest): Promise<WeightRangeReport>;
   getStorageInfo(): Promise<StorageInfo>;
   // Opens a native folder-picker dialog. Resolves to null if cancelled.
   chooseStorageFolder(): Promise<ChooseFolderResult | null>;

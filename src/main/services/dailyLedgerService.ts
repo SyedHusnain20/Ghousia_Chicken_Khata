@@ -79,6 +79,24 @@ function getKhataSalesForDate(db: Database.Database, date: string): EntryWithPar
 }
 
 /**
+ * Waste customers' sales for one date, with the customer's name attached.
+ * Kept as its own query (not merged into getKhataSalesForDate) on purpose:
+ * waste sales get their own separate total on the ledger and must never
+ * leak into Khata sales, income, or profit/loss.
+ */
+function getWasteSalesForDate(db: Database.Database, date: string): EntryWithPartyName[] {
+  return db
+    .prepare(
+      `SELECT we.*, 'waste_customer' AS party_type, we.waste_customer_id AS party_id, w.name AS party_name
+       FROM waste_customer_entries we
+       JOIN waste_customers w ON w.id = we.waste_customer_id
+       WHERE date(we.entry_date) = ?
+       ORDER BY we.entry_date`
+    )
+    .all(date) as EntryWithPartyName[];
+}
+
+/**
  * The Udhar rows saved for one date, in the order they were entered.
  * Udhar is a plain name + amount per row - there's no customer profile
  * behind it, so nothing is joined here.
@@ -118,9 +136,13 @@ export function getDailyLedger(db: Database.Database, ledgerDate: string): Daily
 
   const supplierPurchases = getSupplierPurchasesForDate(db, ledgerDate);
   const khataSales = getKhataSalesForDate(db, ledgerDate);
+  const wasteSales = getWasteSalesForDate(db, ledgerDate);
 
   const supplierPurchasesTotal = floorMoney(supplierPurchases.reduce((sum, e) => sum + e.line_total, 0));
   const khataSalesTotal = floorMoney(khataSales.reduce((sum, e) => sum + e.line_total, 0));
+  // Waste has its own total and is intentionally NOT used in any of the
+  // income / expense / profit-loss figures below.
+  const wasteSalesTotal = floorMoney(wasteSales.reduce((sum, e) => sum + e.line_total, 0));
   const itemsLeft = itemsLeftTotal(ledger);
   const udhars = getUdharsForDate(db, ledgerDate);
   const udharTotal = floorMoney(udhars.reduce((sum, u) => sum + u.amount, 0));
@@ -134,6 +156,8 @@ export function getDailyLedger(db: Database.Database, ledgerDate: string): Daily
     ...ledger,
     supplier_purchases: supplierPurchases,
     khata_sales: khataSales,
+    waste_sales: wasteSales,
+    waste_sales_total: wasteSalesTotal,
     supplier_purchases_total: supplierPurchasesTotal,
     khata_sales_total: khataSalesTotal,
     items_left_total: itemsLeft,
@@ -381,6 +405,14 @@ export function listDailyLedgers(
           .get(ledger.ledger_date) as { total: number }
       ).total
     );
+    // Waste sales: reported separately, never added to income or profit/loss.
+    const wasteTotal = floorMoney(
+      (
+        db
+          .prepare(`SELECT COALESCE(SUM(line_total), 0) AS total FROM waste_customer_entries WHERE date(entry_date) = ?`)
+          .get(ledger.ledger_date) as { total: number }
+      ).total
+    );
     const totalIncome = floorMoney(khataTotal + ledger.sale_income + itemsLeftTotal(ledger) + udharTotal);
     const totalExpenses = floorMoney(supplierTotal + ledger.extra_expenses);
     return {
@@ -388,6 +420,7 @@ export function listDailyLedgers(
       total_income: totalIncome,
       total_expenses: totalExpenses,
       profit_loss: floorMoney(totalIncome - totalExpenses),
+      waste_total: wasteTotal,
     };
   });
 }
@@ -402,16 +435,19 @@ export function getMonthlySummary(
   db: Database.Database,
   year: number,
   month: number
-): { total_income: number; total_expenses: number; total_profit_loss: number } {
+): { total_income: number; total_expenses: number; total_profit_loss: number; total_waste: number } {
   const monthPrefix = `${year}-${String(month).padStart(2, '0')}`;
   const days = listDailyLedgers(db, `${monthPrefix}-01`, `${monthPrefix}-31`);
 
   const totalIncome = floorMoney(days.reduce((sum, d) => sum + d.total_income, 0));
   const totalExpenses = floorMoney(days.reduce((sum, d) => sum + d.total_expenses, 0));
+  // Waste's own monthly total - informational, NOT part of the profit/loss above.
+  const totalWaste = floorMoney(days.reduce((sum, d) => sum + d.waste_total, 0));
 
   return {
     total_income: totalIncome,
     total_expenses: totalExpenses,
     total_profit_loss: floorMoney(totalIncome - totalExpenses),
+    total_waste: totalWaste,
   };
 }

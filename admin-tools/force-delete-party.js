@@ -1,6 +1,6 @@
 // One-time admin tool - NOT part of the shipped app, never installed on a
 // client's PC. Run this yourself, directly against a copy of the live
-// khata.db file, when a party (supplier/customer/shopkeeper) was entered
+// khata.db file, when a party (supplier/customer/shopkeeper/waste_customer) was entered
 // entirely by mistake and needs to be fully removed along with whatever
 // wrong data was logged against them.
 //
@@ -25,7 +25,7 @@ const [, , dbPath, partyType, partyName, ...rest] = process.argv;
 const confirmed = rest.includes('--confirm');
 
 if (!dbPath || !partyType || !partyName) {
-  console.error('Usage: node force-delete-party.js <path-to-khata.db> <supplier|customer|shopkeeper> "<exact name>" [--confirm]');
+  console.error('Usage: node force-delete-party.js <path-to-khata.db> <supplier|customer|shopkeeper|waste_customer> "<exact name>" [--confirm]');
   process.exit(1);
 }
 
@@ -33,11 +33,17 @@ const TABLES = {
   supplier: { party: 'suppliers', entries: 'supplier_entries', bills: 'supplier_bills', fk: 'supplier_id' },
   customer: { party: 'customers', entries: 'customer_entries', bills: 'customer_bills', fk: 'customer_id' },
   shopkeeper: { party: 'shopkeepers', entries: 'shopkeeper_entries', bills: 'shopkeeper_bills', fk: 'shopkeeper_id' },
+  waste_customer: {
+    party: 'waste_customers',
+    entries: 'waste_customer_entries',
+    bills: 'waste_customer_bills',
+    fk: 'waste_customer_id',
+  },
 };
 
 const t = TABLES[partyType];
 if (!t) {
-  console.error(`Unknown party type '${partyType}' - must be supplier, customer, or shopkeeper.`);
+  console.error(`Unknown party type '${partyType}' - must be supplier, customer, shopkeeper, or waste_customer.`);
   process.exit(1);
 }
 

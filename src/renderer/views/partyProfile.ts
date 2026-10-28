@@ -1,8 +1,9 @@
 import { el, mount } from '../dom';
-import { formatDue, formatRs, formatDateTime, todayIso } from '../format';
+import { formatDate, formatDue, formatRs, formatDateTime, todayIso } from '../format';
 import { confirmDialog, emptyState, errorBanner, errorMessage, loadingState } from '../components';
 import { navigate } from '../router';
-import type { BillListItem, Entry, Party, PartyType, Payment } from '../../main/types';
+import { isCustomerLike } from '../partyPaths';
+import type { BillListItem, Entry, Party, PartyType, Payment, WeightRangeReport } from '../../main/types';
 
 // Floors to a whole rupee, without pulling in main's floorMoney (that
 // helper lives in a file that imports better-sqlite3 - fine for main, but
@@ -36,6 +37,13 @@ const COPY: Record<
     entryVerb: 'Add Sale',
     entryNoun: 'sale',
     listPath: '/customers',
+    addEntryLabel: 'Sales (unbilled)',
+  },
+  waste_customer: {
+    title: 'Waste Customer',
+    entryVerb: 'Add Sale',
+    entryNoun: 'sale',
+    listPath: '/waste-customers',
     addEntryLabel: 'Sales (unbilled)',
   },
 };
@@ -123,7 +131,7 @@ function deletePartyControls(party: Party, partyType: PartyType): HTMLElement {
 
 function dueHero(party: Party, partyType: PartyType): HTMLElement {
   const due = formatDue(party.current_due);
-  const label = partyType === 'customer' ? 'Owes you' : 'You owe';
+  const label = isCustomerLike(partyType) ? 'Owes you' : 'You owe';
   return el('div', { class: `due-hero due-hero-${due.kind}` }, [
     el('div', { class: 'due-hero-info' }, [
       el('h1', {}, [party.name]),
@@ -133,6 +141,109 @@ function dueHero(party: Party, partyType: PartyType): HTMLElement {
       el('span', { class: 'due-hero-label' }, [due.kind === 'clear' ? 'Settled up' : label]),
       el('span', { class: 'due-hero-value' }, [due.text]),
     ]),
+  ]);
+}
+
+// Supplier profile only: pick a date range, see how many KG were bought in it.
+// Purely a read-only view - it is not a bill, nothing is saved, and there is
+// deliberately no print / share / export here. Weights are shown exactly as
+// stored and the total is the exact sum (computed in the main process by
+// sumWeightsExact), never floored or ceiled - so 8.9 + 3.9 + 4.3 shows as
+// 17.1 KG, not 17. That's also why nothing here uses floorMoney/formatRs,
+// which are for whole-rupee amounts.
+function weightRangePanel(partyType: PartyType, partyId: number): HTMLElement {
+  const today = todayIso();
+  const fromInput = el('input', { type: 'date', value: `${today.slice(0, 8)}01` }) as HTMLInputElement;
+  const toInput = el('input', { type: 'date', value: today }) as HTMLInputElement;
+  const errorSlot = el('div', { class: 'form-error-slot' });
+  const resultWrap = el('div', { class: 'weight-range-result' });
+
+  const form = el('form', { class: 'inline-form' }, [
+    el('div', { class: 'form-grid form-grid-tight' }, [
+      el('label', {}, ['From', fromInput]),
+      el('label', {}, ['To', toInput]),
+    ]),
+    errorSlot,
+    el('div', { class: 'form-actions' }, [
+      el('button', { class: 'btn btn-primary', type: 'submit' }, ['Show Total KG']),
+    ]),
+  ]);
+
+  function resultView(report: WeightRangeReport): HTMLElement {
+    const range = `${formatDate(report.from_date)} to ${formatDate(report.to_date)}`;
+    if (report.rows.length === 0) {
+      return emptyState(`No purchases between ${range}.`);
+    }
+    return el('div', {}, [
+      el('p', { class: 'field-hint' }, [`Purchases from ${range} (both days included).`]),
+      el('table', { class: 'data-table' }, [
+        el('thead', {}, [
+          el('tr', {}, [el('th', {}, ['Date']), el('th', { class: 'th-right' }, ['Weight (KG)'])]),
+        ]),
+        el(
+          'tbody',
+          {},
+          report.rows.map((r) =>
+            el('tr', {}, [
+              el('td', {}, [formatDate(r.entry_date)]),
+              el('td', { class: 'cell-number' }, [String(r.weight_kg)]),
+            ])
+          )
+        ),
+        el('tfoot', {}, [
+          el('tr', {}, [
+            el('td', {}, ['Total KG']),
+            el('td', { class: 'cell-number cell-strong' }, [`${report.total_weight_kg} KG`]),
+          ]),
+        ]),
+      ]),
+    ]);
+  }
+
+  // If the shopkeeper clicks twice quickly, only the latest answer is shown.
+  let latestRequest = 0;
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    errorSlot.replaceChildren();
+
+    if (!fromInput.value || !toInput.value) {
+      errorSlot.append(errorBanner('Please pick both a From and a To date.'));
+      return;
+    }
+    if (fromInput.value > toInput.value) {
+      errorSlot.append(errorBanner('The From date can\u2019t be after the To date.'));
+      return;
+    }
+
+    const requestId = ++latestRequest;
+    const submitBtn = form.querySelector('button[type="submit"]') as HTMLButtonElement;
+    submitBtn.disabled = true;
+    try {
+      const report = await window.khata.getWeightInDateRange({
+        partyType,
+        partyId,
+        fromDate: fromInput.value,
+        toDate: toInput.value,
+      });
+      if (requestId !== latestRequest) return;
+      resultWrap.replaceChildren(resultView(report));
+    } catch (err) {
+      if (requestId !== latestRequest) return;
+      resultWrap.replaceChildren();
+      errorSlot.replaceChildren(errorBanner(errorMessage(err)));
+    } finally {
+      submitBtn.disabled = false;
+    }
+  });
+
+  return el('section', { class: 'panel' }, [
+    el('h2', {}, ['Total KG Bought']),
+    el('p', { class: 'field-hint' }, [
+      'Choose a date range to see how many KG were bought in it. This is just for your reference \u2014 nothing is saved or billed.',
+    ]),
+    form,
+    resultWrap,
   ]);
 }
 
@@ -979,6 +1090,8 @@ export async function renderPartyProfile(
       el('section', { class: 'panel' }, [el('h2', {}, ['Make a Payment']), paymentFormWrap]),
     ]),
     el('section', { class: 'panel' }, [el('h2', {}, [copy.addEntryLabel]), entriesWrap]),
+    // Suppliers only: how many KG were bought in a chosen date range.
+    partyType === 'supplier' ? weightRangePanel(partyType, partyId) : null,
     el('section', { class: 'panel' }, [el('h2', {}, ['Payments (unbilled)']), unbilledPaymentsWrap]),
     el('section', { class: 'panel' }, [el('h2', {}, ['Generate Bill']), generateBillWrap]),
     el('section', { class: 'panel' }, [el('h2', {}, ['Bill History']), billsWrap]),

@@ -1,4 +1,7 @@
-export type PartyType = 'supplier' | 'customer' | 'shopkeeper';
+// 'waste_customer' behaves exactly like 'customer' (profile, entries, bills,
+// payments, due) but is kept in its own tables and is NEVER counted in the
+// Daily Ledger's income / profit-loss - see getDailyLedger.
+export type PartyType = 'supplier' | 'customer' | 'shopkeeper' | 'waste_customer';
 
 export type PaymentMethod = 'online' | 'cash';
 
@@ -135,6 +138,12 @@ export interface LedgerUdhar {
 export interface DailyLedgerDetail extends DailyLedger {
   supplier_purchases: EntryWithPartyName[];
   khata_sales: EntryWithPartyName[];
+  // Waste customers' sales for the date, with their own separate total.
+  // Shown on the ledger for reference ONLY - deliberately excluded from
+  // total_income / total_expenses / profit_loss (waste is not part of the
+  // shop's profit or loss).
+  waste_sales: EntryWithPartyName[];
+  waste_sales_total: number;
   supplier_purchases_total: number;
   khata_sales_total: number;
   items_left_total: number;
@@ -153,4 +162,20 @@ export interface DailyLedgerSummary {
   total_income: number;
   total_expenses: number;
   profit_loss: number;
+  waste_total: number; // that day's waste-customer sales - informational only, not part of the three figures above
+}
+// One purchase row in a supplier's "Total KG bought" date-range view.
+export interface WeightRangeRow {
+  id: number;
+  entry_date: string; // 'YYYY-MM-DD' (date only - the time of day is irrelevant here)
+  weight_kg: number;
+}
+
+// Result of getWeightInDateRange: every purchase between the two dates
+// (inclusive) and their exact total weight - never floored or ceiled.
+export interface WeightRangeReport {
+  from_date: string; // 'YYYY-MM-DD'
+  to_date: string; // 'YYYY-MM-DD'
+  rows: WeightRangeRow[];
+  total_weight_kg: number;
 }

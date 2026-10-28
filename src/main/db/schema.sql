@@ -33,6 +33,19 @@ CREATE TABLE IF NOT EXISTS shopkeepers (
   created_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Waste customers behave exactly like customers (profile, previous due,
+-- entries, bills, payments) - kept as their own separate tables so their
+-- accounts never mix with Khata customers', and so the Daily Ledger can show
+-- their sales as a separate total that is NOT part of profit/loss.
+CREATE TABLE IF NOT EXISTS waste_customers (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  name          TEXT NOT NULL,
+  contact_number TEXT,
+  opening_due   REAL NOT NULL DEFAULT 0,
+  current_due   REAL NOT NULL DEFAULT 0,
+  created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS supplier_bills (
   id                   INTEGER PRIMARY KEY AUTOINCREMENT,
   supplier_id          INTEGER NOT NULL REFERENCES suppliers(id),
@@ -56,6 +69,16 @@ CREATE TABLE IF NOT EXISTS customer_bills (
 CREATE TABLE IF NOT EXISTS shopkeeper_bills (
   id                   INTEGER PRIMARY KEY AUTOINCREMENT,
   shopkeeper_id        INTEGER NOT NULL REFERENCES shopkeepers(id),
+  bill_date            TEXT NOT NULL DEFAULT (datetime('now')),
+  previous_due         REAL NOT NULL,
+  subtotal             REAL NOT NULL,
+  total_due_after_bill REAL NOT NULL,
+  remaining_due        REAL NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS waste_customer_bills (
+  id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+  waste_customer_id    INTEGER NOT NULL REFERENCES waste_customers(id),
   bill_date            TEXT NOT NULL DEFAULT (datetime('now')),
   previous_due         REAL NOT NULL,
   subtotal             REAL NOT NULL,
@@ -98,6 +121,17 @@ CREATE TABLE IF NOT EXISTS shopkeeper_entries (
   bill_id       INTEGER REFERENCES shopkeeper_bills(id)
 );
 
+CREATE TABLE IF NOT EXISTS waste_customer_entries (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  waste_customer_id INTEGER NOT NULL REFERENCES waste_customers(id),
+  entry_date        TEXT NOT NULL DEFAULT (datetime('now')),
+  item_name         TEXT NOT NULL DEFAULT 'Chicken',
+  weight_kg         REAL NOT NULL,
+  rate_per_kg       REAL NOT NULL,
+  line_total        REAL NOT NULL,
+  bill_id           INTEGER REFERENCES waste_customer_bills(id)
+);
+
 -- Every payment, from either entry point (bill-time or standalone profile
 -- field). No CHECK constraint on party_type - the app's PartyType union
 -- already enforces valid values at the TypeScript level, and a DB-level
@@ -120,6 +154,8 @@ CREATE INDEX IF NOT EXISTS idx_customer_entries_unbilled
   ON customer_entries (customer_id) WHERE bill_id IS NULL;
 CREATE INDEX IF NOT EXISTS idx_shopkeeper_entries_unbilled
   ON shopkeeper_entries (shopkeeper_id) WHERE bill_id IS NULL;
+CREATE INDEX IF NOT EXISTS idx_waste_customer_entries_unbilled
+  ON waste_customer_entries (waste_customer_id) WHERE bill_id IS NULL;
 
 -- Daily Ledger: one row per business date, created explicitly by the
 -- shopkeeper (UNIQUE constraint makes accidental duplicates for the same
@@ -174,3 +210,4 @@ CREATE INDEX IF NOT EXISTS idx_daily_ledger_udhars_date ON daily_ledger_udhars (
 CREATE INDEX IF NOT EXISTS idx_supplier_entries_date ON supplier_entries (entry_date);
 CREATE INDEX IF NOT EXISTS idx_customer_entries_date ON customer_entries (entry_date);
 CREATE INDEX IF NOT EXISTS idx_shopkeeper_entries_date ON shopkeeper_entries (entry_date);
+CREATE INDEX IF NOT EXISTS idx_waste_customer_entries_date ON waste_customer_entries (entry_date);

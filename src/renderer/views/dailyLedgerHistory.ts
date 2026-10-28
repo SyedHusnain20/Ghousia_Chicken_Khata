@@ -21,6 +21,8 @@ function historyTable(rows: DailyLedgerSummary[]): HTMLElement {
       el('td', { class: 'cell-number' }, [formatRs(row.total_income)]),
       el('td', { class: 'cell-number' }, [formatRs(row.total_expenses)]),
       el('td', { class: `cell-number cell-strong cell-${result.kind}` }, [result.short]),
+      // Waste is shown for reference only - it is not part of the figures to its left.
+      el('td', { class: 'cell-number cell-muted' }, [formatRs(row.waste_total)]),
     ]);
     const go = () => navigate(`/ledger/${row.ledger_date}`);
     tr.addEventListener('click', go);
@@ -37,6 +39,7 @@ function historyTable(rows: DailyLedgerSummary[]): HTMLElement {
         el('th', { class: 'th-right' }, ['Total Income']),
         el('th', { class: 'th-right' }, ['Total Expenses']),
         el('th', { class: 'th-right' }, ['Profit / Loss']),
+        el('th', { class: 'th-right' }, ['Waste (not in P/L)']),
       ]),
     ]),
     el('tbody', {}, tableRows),
@@ -107,6 +110,10 @@ function monthlySummaryPanel(
       el('div', { class: `summary-card summary-card-${result.kind}` }, [
         el('span', { class: 'summary-label' }, [result.kind === 'credit' ? 'Total Profit' : result.kind === 'due' ? 'Total Loss' : 'Result']),
         el('span', { class: 'summary-value' }, [result.kind === 'clear' ? formatRs(0) : formatRs(Math.abs(summary.total_profit_loss))]),
+      ]),
+      el('div', { class: 'summary-card summary-card-muted' }, [
+        el('span', { class: 'summary-label' }, ['Waste Total (not in Profit/Loss)']),
+        el('span', { class: 'summary-value' }, [formatRs(summary.total_waste)]),
       ]),
     ]),
   ]);

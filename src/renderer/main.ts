@@ -12,6 +12,7 @@ import { renderSettings } from './views/settings';
 import { showLockScreen } from './views/lockScreen';
 import { errorBanner, errorMessage } from './components';
 import { todayIso } from './format';
+import type { PartyType } from '../main/types';
 
 const root = document.getElementById('app');
 if (!root) {
@@ -65,6 +66,19 @@ function startApp(appRoot: HTMLElement): void {
     renderPartyProfile('shopkeeper', id, el);
   });
 
+  route('/waste-customers', (_params, el) => {
+    renderPartyList('waste_customer', el);
+  });
+
+  route('/waste-customers/:id', (params, el) => {
+    const id = Number(params.id);
+    if (!Number.isInteger(id)) {
+      renderPlaceholder(el, 'Waste customer not found', 'That waste customer link doesn\u2019t look right.');
+      return;
+    }
+    renderPartyProfile('waste_customer', id, el);
+  });
+
   route('/ledger', (_params, el) => {
     renderDailyLedger(todayIso(), el);
   });
@@ -84,12 +98,12 @@ function startApp(appRoot: HTMLElement): void {
   route('/bills/:partyType/:id', (params, el) => {
     const id = Number(params.id);
     const partyType = params.partyType;
-    const validTypes = ['supplier', 'customer', 'shopkeeper'];
-    if (!Number.isInteger(id) || !validTypes.includes(partyType)) {
+    const validTypes: PartyType[] = ['supplier', 'customer', 'shopkeeper', 'waste_customer'];
+    if (!Number.isInteger(id) || !validTypes.includes(partyType as PartyType)) {
       renderPlaceholder(el, 'Bill not found', 'That bill link doesn\u2019t look right.');
       return;
     }
-    renderBillDetail(partyType as 'supplier' | 'customer' | 'shopkeeper', id, el);
+    renderBillDetail(partyType as PartyType, id, el);
   });
 
   route('/settings', (_params, el) => {

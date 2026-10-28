@@ -2,6 +2,7 @@ import { el, mount } from '../dom';
 import { formatDateShort, formatDateTime, formatRs } from '../format';
 import { button, confirmDialog, errorBanner, errorMessage, ipcErrorMessage, loadingState, successBanner } from '../components';
 import { navigate } from '../router';
+import { partyProfilePath } from '../partyPaths';
 import { SHOP_NAME_EN, SHOP_NAME_UR } from '../shopConfig';
 import type { BillDetail, PartyType } from '../../main/types';
 
@@ -9,8 +10,14 @@ const TITLE: Record<PartyType, string> = {
   supplier: 'Supplier Bill',
   customer: 'Customer Bill',
   shopkeeper: 'Shopkeeper Bill',
+  waste_customer: 'Waste Customer Bill',
 };
-const PARTY_LABEL: Record<PartyType, string> = { supplier: 'Supplier', customer: 'Customer', shopkeeper: 'Shopkeeper' };
+const PARTY_LABEL: Record<PartyType, string> = {
+  supplier: 'Supplier',
+  customer: 'Customer',
+  shopkeeper: 'Shopkeeper',
+  waste_customer: 'Waste Customer',
+};
 const PAYMENT_METHOD_LABEL: Record<string, string> = { cash: 'Cash', online: 'Online' };
 
 function receiptMarkup(bill: BillDetail): HTMLElement {
@@ -122,7 +129,7 @@ export async function renderBillDetail(
     return;
   }
 
-  const backHref = `#/${partyType}s/${bill.party_id}`;
+  const backHref = `#${partyProfilePath(partyType, bill.party_id)}`;
   const backLink = el('a', { href: backHref, class: 'back-link' }, [`\u2190 Back to ${bill.party_name}`]);
 
   const printBtn = button('Print bill', () => window.print());
@@ -177,7 +184,7 @@ export async function renderBillDetail(
             `with their original dates and amounts.`
         ),
         el('div', { class: 'form-actions' }, [
-          button(`Go to ${result.partyName}`, () => navigate(`/${partyType}s/${result.partyId}`)),
+          button(`Go to ${result.partyName}`, () => navigate(partyProfilePath(partyType, result.partyId))),
         ])
       );
     } catch (err) {

@@ -50,9 +50,15 @@ const TITLE: Record<PartyType, string> = {
   supplier: 'Supplier Bill',
   customer: 'Customer Bill',
   shopkeeper: 'Shopkeeper Bill',
+  waste_customer: 'Waste Customer Bill',
 };
 
-const PARTY_LABEL: Record<PartyType, string> = { supplier: 'Supplier', customer: 'Customer', shopkeeper: 'Shopkeeper' };
+const PARTY_LABEL: Record<PartyType, string> = {
+  supplier: 'Supplier',
+  customer: 'Customer',
+  shopkeeper: 'Shopkeeper',
+  waste_customer: 'Waste Customer',
+};
 
 // Deliberately mirrors src/renderer/style.css's .receipt* rules and color
 // tokens as closely as possible, so the shared image looks like the same

@@ -981,6 +981,13 @@ input:focus, select:focus, button:focus-visible, a:focus-visible, .clickable-row
   color: var(--color-credit);
 }
 
+/* Waste customers: same family as customers, but visibly its own kind of account. */
+.type-badge-waste_customer {
+  background: var(--color-surface-muted);
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border);
+}
+
 /* ---------------- Printable receipt ---------------- */
 
 .receipt {

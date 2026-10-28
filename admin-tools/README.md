@@ -6,7 +6,7 @@ part of the installed app itself.
 
 ## force-delete-party.js
 
-Permanently deletes a supplier/customer/shopkeeper AND everything logged
+Permanently deletes a supplier/customer/shopkeeper/waste_customer AND everything logged
 against them (entries, bills, payments) - for the specific situation
 where a party was entered by mistake and needs to be fully wiped out.
 

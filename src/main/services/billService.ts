@@ -48,6 +48,13 @@ export function listAllBills(db: Database.Database, filter: ListAllBillsFilter =
     JOIN shopkeepers k ON k.id = kb.shopkeeper_id
   `;
 
+  const wasteCustomerSql = `
+    SELECT wb.id, 'waste_customer' AS party_type, wb.waste_customer_id AS party_id, w.name AS party_name,
+           wb.bill_date, wb.previous_due, wb.subtotal, wb.total_due_after_bill, wb.remaining_due
+    FROM waste_customer_bills wb
+    JOIN waste_customers w ON w.id = wb.waste_customer_id
+  `;
+
   let sql: string;
   let allParams: string[];
 
@@ -60,6 +67,9 @@ export function listAllBills(db: Database.Database, filter: ListAllBillsFilter =
   } else if (filter.partyType === 'shopkeeper') {
     sql = `${shopkeeperSql} ${whereSql} ORDER BY kb.bill_date DESC, kb.id DESC`;
     allParams = params;
+  } else if (filter.partyType === 'waste_customer') {
+    sql = `${wasteCustomerSql} ${whereSql} ORDER BY wb.bill_date DESC, wb.id DESC`;
+    allParams = params;
   } else {
     sql = `
       SELECT * FROM (
@@ -68,11 +78,13 @@ export function listAllBills(db: Database.Database, filter: ListAllBillsFilter =
         ${customerSql}
         UNION ALL
         ${shopkeeperSql}
+        UNION ALL
+        ${wasteCustomerSql}
       )
       ${whereSql}
       ORDER BY bill_date DESC, id DESC
     `;
-    allParams = [...params, ...params, ...params];
+    allParams = [...params, ...params, ...params, ...params];
   }
 
   return db.prepare(sql).all(...allParams) as BillListItem[];

@@ -28,12 +28,14 @@ import type {
   SaveDailyLedgerUdharsRequest,
   ListDailyLedgersRequest,
   GetMonthlySummaryRequest,
+  GetWeightRangeRequest,
 } from '../shared/ipc';
 import {
   createParty,
   getParty,
   getAllParties,
   getAllPartiesWithActivity,
+  getWeightInDateRange,
   deleteParty,
   forceDeleteParty,
   addEntry,
@@ -85,6 +87,10 @@ export function registerIpcHandlers(db: Database.Database): void {
 
   guardedHandle(IpcChannels.PARTY_LIST_WITH_ACTIVITY, (_event, req: ListPartiesRequest) => {
     return getAllPartiesWithActivity(db, req.partyType);
+  });
+
+  guardedHandle(IpcChannels.PARTY_WEIGHT_RANGE, (_event, req: GetWeightRangeRequest) => {
+    return getWeightInDateRange(db, req.partyType, req.partyId, req.fromDate, req.toDate);
   });
 
   guardedHandle(IpcChannels.PARTY_DELETE, (_event, req: DeletePartyRequest) => {

@@ -10,7 +10,10 @@ import {
   RestoreBillResult,
   Payment,
   PaymentMethod,
+  WeightRangeReport,
+  WeightRangeRow,
 } from '../types';
+import { sumWeightsExact } from '../../shared/weight';
 
 // Table names differ by party type but the logic is identical, so we
 // resolve table names once per call rather than duplicating every function.
@@ -22,6 +25,13 @@ function tables(partyType: PartyType) {
       return { party: 'customers', entries: 'customer_entries', bills: 'customer_bills', fk: 'customer_id' };
     case 'shopkeeper':
       return { party: 'shopkeepers', entries: 'shopkeeper_entries', bills: 'shopkeeper_bills', fk: 'shopkeeper_id' };
+    case 'waste_customer':
+      return {
+        party: 'waste_customers',
+        entries: 'waste_customer_entries',
+        bills: 'waste_customer_bills',
+        fk: 'waste_customer_id',
+      };
     default: {
       // Exhaustiveness check: if PartyType ever gains a new member without
       // a case here, this line fails to compile instead of silently
@@ -75,6 +85,53 @@ export function getAllPartiesWithActivity(db: Database.Database, partyType: Part
        FROM ${t.party} p`
     )
     .all() as PartyWithActivity[];
+}
+
+/**
+ * Every purchase a party has logged between two dates (inclusive), and
+ * their exact total weight. Used by the supplier profile's "Total KG
+ * bought" view, which is purely informational - it is not a bill and
+ * changes nothing.
+ *
+ * All entries count, billed or not (a bill only locks an entry; it doesn't
+ * change how much chicken was bought), and whatever the entry's item label
+ * says - the question being answered is "how many KG came in".
+ *
+ * The total is the exact sum of the stored weights: never floored, never
+ * ceiled (see sumWeightsExact for why plain float addition isn't used).
+ */
+export function getWeightInDateRange(
+  db: Database.Database,
+  partyType: PartyType,
+  partyId: number,
+  fromDate: string,
+  toDate: string
+): WeightRangeReport {
+  if (!DATE_ONLY_RE.test(fromDate) || !DATE_ONLY_RE.test(toDate)) {
+    throw new Error("Dates must be in 'YYYY-MM-DD' format");
+  }
+  if (fromDate > toDate) {
+    throw new Error('The "from" date can\u2019t be after the "to" date.');
+  }
+
+  const t = tables(partyType);
+  getParty(db, partyType, partyId); // throws a clear error if the party doesn't exist
+
+  const rows = db
+    .prepare(
+      `SELECT e.id AS id, date(e.entry_date) AS entry_date, e.weight_kg AS weight_kg
+       FROM ${t.entries} e
+       WHERE e.${t.fk} = ? AND date(e.entry_date) BETWEEN ? AND ?
+       ORDER BY e.entry_date, e.id`
+    )
+    .all(partyId, fromDate, toDate) as WeightRangeRow[];
+
+  return {
+    from_date: fromDate,
+    to_date: toDate,
+    rows,
+    total_weight_kg: sumWeightsExact(rows.map((r) => r.weight_kg)),
+  };
 }
 
 /**

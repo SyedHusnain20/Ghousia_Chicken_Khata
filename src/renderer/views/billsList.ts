@@ -12,6 +12,7 @@ function filterTabs(active: FilterValue, onChange: (value: FilterValue) => void)
     { value: 'supplier', label: 'Suppliers' },
     { value: 'shopkeeper', label: 'Shopkeepers' },
     { value: 'customer', label: 'Customers' },
+    { value: 'waste_customer', label: 'Waste Customers' },
   ];
   return el(
     'div',
@@ -30,7 +31,12 @@ function billsTable(bills: BillListItem[]): HTMLElement {
   if (bills.length === 0) {
     return emptyState('No bills generated yet.');
   }
-  const partyLabel: Record<PartyType, string> = { supplier: 'Supplier', customer: 'Customer', shopkeeper: 'Shopkeeper' };
+  const partyLabel: Record<PartyType, string> = {
+    supplier: 'Supplier',
+    customer: 'Customer',
+    shopkeeper: 'Shopkeeper',
+    waste_customer: 'Waste Customer',
+  };
   const rows = bills.map((bill) => {
     const row = el('tr', { class: 'clickable-row', tabindex: '0' }, [
       el('td', {}, [formatDateTime(bill.bill_date)]),
