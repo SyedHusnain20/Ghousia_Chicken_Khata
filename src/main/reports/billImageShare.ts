@@ -3,7 +3,8 @@ import fs from 'fs';
 import path from 'path';
 import Database from 'better-sqlite3';
 import { getBillById } from '../services/partyService';
-import type { BillDetail, PartyType } from '../types';
+import type { BillDetail, Entry, PartyType } from '../types';
+import { summarizeShopkeeperBill, shopkeeperBalance } from '../../shared/shopkeeperBill';
 
 // Mirrors src/renderer/shopConfig.ts - kept as local constants rather than
 // importing across the main/renderer boundary (two separate TypeScript
@@ -60,6 +61,64 @@ const PARTY_LABEL: Record<PartyType, string> = {
   waste_customer: 'Waste Customer',
 };
 
+function balanceText(due: number): { html: string; cls: string } {
+  const b = shopkeeperBalance(due);
+  const word = b.kind === 'receivable' ? ' receivable' : b.kind === 'payable' ? ' payable' : '';
+  return { html: `${formatRs(b.amount)}${word}`, cls: `bal-${b.kind}` };
+}
+
+function shopkeeperSectionHtml(label: string, entries: Entry[], totalLabel: string, total: number): string {
+  const rows = entries
+    .map(
+      (item) => `
+      <tr>
+        <td>${formatDateShort(item.entry_date)}</td>
+        <td>${escapeHtml(item.item_name)}</td>
+        <td class="num">${item.weight_kg}</td>
+        <td class="num">${formatRs(item.rate_per_kg)}</td>
+        <td class="num">${formatRs(item.line_total)}</td>
+      </tr>`
+    )
+    .join('');
+  return `<div class="payments-section">
+    <div class="payments-section-label">${label}</div>
+    <table>
+      <thead>
+        <tr><th>Date</th><th>Item</th><th class="num">KG</th><th class="num">Rate</th><th class="num">Total</th></tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <div class="total-row section-total"><span>${totalLabel}</span><span>${formatRs(total)}</span></div>
+  </div>`;
+}
+
+// Shopkeeper bill: all sales and their total, then all purchases and their
+// total, then total sale, total purchased, previous due, payments (if any)
+// and the remaining amount - receivable in green, payable in red. Mirrors
+// shopkeeperBody() in src/renderer/views/billDetail.ts.
+function buildShopkeeperBodyHtml(bill: BillDetail): string {
+  const { sales, purchases, totalSale, totalPurchase } = summarizeShopkeeperBill(bill);
+  const previous = balanceText(bill.previous_due);
+  const remaining = balanceText(bill.remaining_due);
+  const paymentRows = bill.payments
+    .map((p) => {
+      const who = p.direction === 'in' ? 'They paid' : 'You paid';
+      const how = p.payment_method ? PAYMENT_METHOD_LABEL[p.payment_method] : '\u2014';
+      return `<div class="total-row"><span>${who} (${how}, ${formatDateShort(p.paid_at)})</span><span>${formatRs(p.amount)}</span></div>`;
+    })
+    .join('');
+  return `
+  ${sales.length > 0 ? shopkeeperSectionHtml('Sales', sales, 'Total sales', totalSale) : ''}
+  ${purchases.length > 0 ? shopkeeperSectionHtml('Purchases', purchases, 'Total purchases', totalPurchase) : ''}
+  <div class="totals">
+    <div class="total-row"><span>Total sale</span><span>${formatRs(totalSale)}</span></div>
+    <div class="total-row"><span>Total purchased</span><span>${formatRs(totalPurchase)}</span></div>
+    <div class="total-row ${previous.cls}"><span>Previous due</span><span>${previous.html}</span></div>
+    ${paymentRows}
+    <div class="total-row total-grand ${remaining.cls}"><span>Remaining</span><span>${remaining.html}</span></div>
+  </div>`;
+}
+
 // Deliberately mirrors src/renderer/style.css's .receipt* rules and color
 // tokens as closely as possible, so the shared image looks like the same
 // bill the shopkeeper sees and prints in-app - just rendered standalone,
@@ -91,6 +150,35 @@ function buildBillHtml(bill: BillDetail): string {
       </tr>`
     )
     .join('');
+
+  const standardBodyHtml = `
+  <table>
+    <thead>
+      <tr><th>Date</th><th>Item</th><th class="num">KG</th><th class="num">Rate</th><th class="num">Total</th></tr>
+    </thead>
+    <tbody>${itemRows}</tbody>
+  </table>
+  <div class="totals">
+    <div class="total-row"><span>This bill's purchases</span><span>${formatRs(bill.subtotal)}</span></div>
+    <div class="total-row"><span>Previous due</span><span>${formatRs(bill.previous_due)}</span></div>
+    <div class="total-row total-grand"><span>Grand total</span><span>${formatRs(bill.total_due_after_bill)}</span></div>
+    <div class="total-row"><span>Total paid</span><span>${paidTotal > 0 ? formatRs(paidTotal) : '\u2014 (not paid yet)'}</span></div>
+    <div class="total-row total-remaining"><span>Remaining due</span><span>${formatRs(bill.remaining_due)}</span></div>
+  </div>
+  ${
+    bill.payments.length > 0
+      ? `<div class="payments-section">
+    <div class="payments-section-label">Payments</div>
+    <table>
+    <thead>
+      <tr><th>Date</th><th>Method</th><th class="num">Paid</th></tr>
+    </thead>
+    <tbody>${paymentRows}</tbody>
+  </table>
+  </div>`
+      : ''
+  }
+`;
 
   return `<!DOCTYPE html>
 <html>
@@ -206,6 +294,14 @@ function buildBillHtml(bill: BillDetail): string {
     font-size: 15px;
     color: #A9372F;
   }
+  .section-total {
+    font-weight: 700;
+    border-top: 1px dashed #DED4B8;
+  }
+  .bal-receivable { color: #2E6B4E; }
+  .bal-payable { color: #A9372F; }
+  .bal-clear { color: #6B6255; }
+  .total-grand.bal-receivable, .total-grand.bal-payable { font-size: 15px; }
   .footer {
     text-align: center;
     margin-top: 16px;
@@ -229,32 +325,7 @@ function buildBillHtml(bill: BillDetail): string {
     <div class="meta-row"><span>${PARTY_LABEL[bill.party_type]}</span><span>${escapeHtml(bill.party_name)}</span></div>
     ${bill.party_contact ? `<div class="meta-row"><span>Contact</span><span>${escapeHtml(bill.party_contact)}</span></div>` : ''}
   </div>
-  <table>
-    <thead>
-      <tr><th>Date</th><th>Item</th><th class="num">KG</th><th class="num">Rate</th><th class="num">Total</th></tr>
-    </thead>
-    <tbody>${itemRows}</tbody>
-  </table>
-  <div class="totals">
-    <div class="total-row"><span>This bill's purchases</span><span>${formatRs(bill.subtotal)}</span></div>
-    <div class="total-row"><span>Previous due</span><span>${formatRs(bill.previous_due)}</span></div>
-    <div class="total-row total-grand"><span>Grand total</span><span>${formatRs(bill.total_due_after_bill)}</span></div>
-    <div class="total-row"><span>Total paid</span><span>${paidTotal > 0 ? formatRs(paidTotal) : '\u2014 (not paid yet)'}</span></div>
-    <div class="total-row total-remaining"><span>Remaining due</span><span>${formatRs(bill.remaining_due)}</span></div>
-  </div>
-  ${
-    bill.payments.length > 0
-      ? `<div class="payments-section">
-    <div class="payments-section-label">Payments</div>
-    <table>
-    <thead>
-      <tr><th>Date</th><th>Method</th><th class="num">Paid</th></tr>
-    </thead>
-    <tbody>${paymentRows}</tbody>
-  </table>
-  </div>`
-      : ''
-  }
+  ${bill.party_type === 'shopkeeper' ? buildShopkeeperBodyHtml(bill) : standardBodyHtml}
   <div class="footer">
     <div>Powered by R&amp;R Digital Solutions</div>
     <div>Contact: 03126641281</div>

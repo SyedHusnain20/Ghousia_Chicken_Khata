@@ -1190,3 +1190,40 @@ input:focus, select:focus, button:focus-visible, a:focus-visible, .clickable-row
   width: 100%;
   padding: 12px 18px;
 }
+
+/* ---------------- Item dropdown ---------------- */
+.item-select { width: 100%; }
+
+/* ---------------- Shopkeeper bill (sales / purchases / summary) ---------------- */
+.receipt-section-total {
+  font-weight: 700;
+  border-top: 1px dashed var(--color-border);
+  margin-bottom: 4px;
+}
+/* Balances read green when they owe you, red when you owe them. */
+.receipt-balance-receivable { color: var(--color-credit); }
+.receipt-balance-payable { color: var(--color-due); }
+.receipt-balance-clear { color: var(--color-clear); }
+.receipt-balance-receivable.receipt-total-grand,
+.receipt-balance-payable.receipt-total-grand {
+  font-size: 15px;
+}
+
+/* ---------------- Counter Sale ---------------- */
+.counter-bill-card {
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-bottom: 14px;
+}
+.counter-bill-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.counter-bill-name {
+  font-weight: 700;
+  font-size: 16px;
+}

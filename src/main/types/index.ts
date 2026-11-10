@@ -5,6 +5,17 @@ export type PartyType = 'supplier' | 'customer' | 'shopkeeper' | 'waste_customer
 
 export type PaymentMethod = 'online' | 'cash';
 
+// Shopkeepers are both bought from ('purchase') and sold to ('sale'). Every
+// other party type only ever has one kind of entry, so for them this is
+// absent (their tables have no such column).
+export type EntryType = 'purchase' | 'sale';
+
+// Which way a payment moved. 'out' = the shop paid the party (reduces what
+// the shop owes) - every payment before shopkeeper sales existed, and still
+// the default. 'in' = the party paid the shop (only meaningful for a
+// shopkeeper who owes the shop money after a sale).
+export type PaymentDirection = 'out' | 'in';
+
 export interface Party {
   id: number;
   name: string;
@@ -30,6 +41,7 @@ export interface Entry {
   rate_per_kg: number;
   line_total: number;
   bill_id: number | null;
+  entry_type?: EntryType; // shopkeeper entries only
 }
 
 export interface Bill {
@@ -87,6 +99,7 @@ export interface Payment {
   payment_method: PaymentMethod | null; // null for payments recorded before this field existed
   paid_at: string;
   note: string | null;
+  direction: PaymentDirection;
 }
 
 // An entry with its party's name attached - used for daily ledger line
@@ -178,4 +191,35 @@ export interface WeightRangeReport {
   to_date: string; // 'YYYY-MM-DD'
   rows: WeightRangeRow[];
   total_weight_kg: number;
+}
+
+// ---------------------------------------------------------------------------
+// Counter Sale: walk-in sales with no party/due/payments. Stored in their own
+// tables and deliberately never read by the Daily Ledger, profit/loss, the
+// global Bills list or any party balance.
+// ---------------------------------------------------------------------------
+
+export interface CounterSaleEntry {
+  id: number;
+  entry_date: string; // 'YYYY-MM-DD HH:MM:SS'
+  customer_name: string | null;
+  customer_number: string | null;
+  item_name: string;
+  weight_kg: number;
+  rate_per_kg: number;
+  line_total: number;
+  bill_id: number | null;
+}
+
+// One generated counter-sale bill. customer_label is the typed name, or
+// "Customer N" (N = this bill's position among that day's bills) when the
+// name was left blank.
+export interface CounterSaleBill {
+  id: number;
+  bill_date: string; // 'YYYY-MM-DD HH:MM:SS'
+  customer_name: string | null;
+  customer_number: string | null;
+  customer_label: string;
+  total: number;
+  items: CounterSaleEntry[];
 }

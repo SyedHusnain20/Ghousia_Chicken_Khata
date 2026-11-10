@@ -10,6 +10,8 @@ import {
   RestoreBillResult,
   Payment,
   PaymentMethod,
+  PaymentDirection,
+  EntryType,
   WeightRangeReport,
   WeightRangeRow,
 } from '../types';
@@ -40,6 +42,58 @@ function tables(partyType: PartyType) {
       throw new Error(`Unknown party type: ${_exhaustive}`);
     }
   }
+}
+
+/**
+ * How an entry moves the party's running due. Purchases from a supplier or
+ * shopkeeper and sales to a customer all ADD to the due. The one exception
+ * is a SALE to a SHOPKEEPER: they are buying from the shop, so it pulls the
+ * balance the shop owes them DOWN (and past zero, into "they owe the
+ * shop"). Only shopkeeper tables have an entry_type column; for every
+ * other party type this is always +1.
+ */
+function entrySign(partyType: PartyType, entryType: EntryType | undefined): 1 | -1 {
+  return partyType === 'shopkeeper' && entryType === 'sale' ? -1 : 1;
+}
+
+function signedLineTotal(partyType: PartyType, entry: Pick<Entry, 'line_total' | 'entry_type'>): number {
+  return entrySign(partyType, entry.entry_type) * entry.line_total;
+}
+
+function signedEntriesTotal(partyType: PartyType, entries: Entry[]): number {
+  return floorMoney(entries.reduce((sum, e) => sum + signedLineTotal(partyType, e), 0));
+}
+
+/** A payment's effect on the due: 'out' (shop paid) lowers it, 'in' (party paid the shop) raises it. */
+function paymentDueEffect(p: Pick<Payment, 'amount' | 'direction'>): number {
+  return p.direction === 'in' ? p.amount : -p.amount;
+}
+
+function paymentsEffectTotal(payments: Payment[]): number {
+  return floorMoney(payments.reduce((sum, p) => sum + paymentDueEffect(p), 0));
+}
+
+export interface ShopkeeperTotals {
+  total_sale: number;
+  total_purchase: number;
+}
+
+/**
+ * Lifetime sale and purchase totals for a shopkeeper (billed and unbilled
+ * entries alike) - the "total sale - total purchase" figure shown at the top
+ * of their profile.
+ */
+export function getShopkeeperTotals(db: Database.Database, shopkeeperId: number): ShopkeeperTotals {
+  getParty(db, 'shopkeeper', shopkeeperId); // clear error if they don't exist
+  const row = db
+    .prepare(
+      `SELECT
+         COALESCE(SUM(CASE WHEN entry_type = 'sale' THEN line_total END), 0) AS total_sale,
+         COALESCE(SUM(CASE WHEN entry_type = 'sale' THEN 0 ELSE line_total END), 0) AS total_purchase
+       FROM shopkeeper_entries WHERE shopkeeper_id = ?`
+    )
+    .get(shopkeeperId) as ShopkeeperTotals;
+  return { total_sale: floorMoney(row.total_sale), total_purchase: floorMoney(row.total_purchase) };
 }
 
 export function createParty(
@@ -252,13 +306,17 @@ export function findPossibleDuplicateEntry(
   itemName: string,
   weightKg: number,
   ratePerKg: number,
-  entryDateOnly: string
+  entryDateOnly: string,
+  entryType: EntryType = 'purchase'
 ): Entry | undefined {
   const t = tables(partyType);
+  // A shopkeeper's sale and purchase of the same item/weight/rate on the
+  // same day are two different things, not a double entry.
+  const typeClause = partyType === 'shopkeeper' ? ` AND entry_type = '${entryType === 'sale' ? 'sale' : 'purchase'}'` : '';
   return db
     .prepare(
       `SELECT * FROM ${t.entries}
-       WHERE ${t.fk} = ? AND item_name = ? AND weight_kg = ? AND rate_per_kg = ? AND date(entry_date) = ?
+       WHERE ${t.fk} = ? AND item_name = ? AND weight_kg = ? AND rate_per_kg = ? AND date(entry_date) = ?${typeClause}
        ORDER BY id DESC
        LIMIT 1`
     )
@@ -273,8 +331,15 @@ export function addEntry(
   weightKg: number,
   ratePerKg: number,
   entryDate?: string,
-  confirmDuplicate: boolean = false
+  confirmDuplicate: boolean = false,
+  entryType: EntryType = 'purchase'
 ): number {
+  if (entryType !== 'purchase' && entryType !== 'sale') {
+    throw new Error("entryType must be 'purchase' or 'sale'");
+  }
+  if (entryType === 'sale' && partyType !== 'shopkeeper') {
+    throw new Error('Only shopkeepers have both sales and purchases');
+  }
   if (!Number.isFinite(weightKg) || weightKg <= 0) {
     throw new Error('Weight (KG) must be a number greater than zero');
   }
@@ -290,7 +355,7 @@ export function addEntry(
 
   if (!confirmDuplicate) {
     const entryDateOnly = entryDate ?? pakistanNow().date;
-    const dup = findPossibleDuplicateEntry(db, partyType, partyId, itemName, weightKg, ratePerKg, entryDateOnly);
+    const dup = findPossibleDuplicateEntry(db, partyType, partyId, itemName, weightKg, ratePerKg, entryDateOnly, entryType);
     if (dup) {
       // Prefixed marker so the renderer can recognize this as a
       // "confirm and retry" situation rather than a hard validation
@@ -304,15 +369,25 @@ export function addEntry(
   const run = db.transaction(() => {
     const now = pakistanNow();
     const stampedEntryDate = `${entryDate ?? now.date} ${now.time}`;
-    const stmt = db.prepare(
-      `INSERT INTO ${t.entries} (${t.fk}, entry_date, item_name, weight_kg, rate_per_kg, line_total)
-       VALUES (?, ?, ?, ?, ?, ?)`
-    );
-    const result = stmt.run(partyId, stampedEntryDate, itemName, weightKg, ratePerKg, lineTotal);
+    // Only shopkeeper entries carry an entry_type column.
+    const stmt =
+      partyType === 'shopkeeper'
+        ? db.prepare(
+            `INSERT INTO ${t.entries} (${t.fk}, entry_date, item_name, weight_kg, rate_per_kg, line_total, entry_type)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`
+          )
+        : db.prepare(
+            `INSERT INTO ${t.entries} (${t.fk}, entry_date, item_name, weight_kg, rate_per_kg, line_total)
+             VALUES (?, ?, ?, ?, ?, ?)`
+          );
+    const result =
+      partyType === 'shopkeeper'
+        ? stmt.run(partyId, stampedEntryDate, itemName, weightKg, ratePerKg, lineTotal, entryType)
+        : stmt.run(partyId, stampedEntryDate, itemName, weightKg, ratePerKg, lineTotal);
     const entryId = result.lastInsertRowid as number;
 
     const party = getParty(db, partyType, partyId);
-    const newDue = floorMoney(party.current_due + lineTotal);
+    const newDue = floorMoney(party.current_due + entrySign(partyType, entryType) * lineTotal);
     db.prepare(`UPDATE ${t.party} SET current_due = ? WHERE id = ?`).run(newDue, partyId);
 
     return entryId;
@@ -394,7 +469,9 @@ export function updateEntry(
     ).run(newEntryDate, itemName, weightKg, ratePerKg, newLineTotal, entryId);
 
     const party = getParty(db, partyType, partyId);
-    const dueAdjustment = floorMoney(newLineTotal - existing.line_total);
+    // An entry's type (sale/purchase) can't be changed by editing - only its
+    // amount - so the same sign applies to both the old and new totals.
+    const dueAdjustment = floorMoney(entrySign(partyType, existing.entry_type) * (newLineTotal - existing.line_total));
     const newDue = floorMoney(party.current_due + dueAdjustment);
     db.prepare(`UPDATE ${t.party} SET current_due = ? WHERE id = ?`).run(newDue, partyId);
   })();
@@ -422,7 +499,7 @@ export function deleteEntry(db: Database.Database, partyType: PartyType, partyId
     db.prepare(`DELETE FROM ${t.entries} WHERE id = ?`).run(entryId);
 
     const party = getParty(db, partyType, partyId);
-    const newDue = floorMoney(party.current_due - existing.line_total);
+    const newDue = floorMoney(party.current_due - signedLineTotal(partyType, existing));
     db.prepare(`UPDATE ${t.party} SET current_due = ? WHERE id = ?`).run(newDue, partyId);
   })();
 }
@@ -447,7 +524,7 @@ function findDuplicateFingerprints(entries: Entry[]): Entry[][] {
   const groups = new Map<string, Entry[]>();
   for (const e of entries) {
     const day = e.entry_date.split(' ')[0];
-    const key = `${e.item_name}|${e.weight_kg}|${e.rate_per_kg}|${day}`;
+    const key = `${e.entry_type ?? ''}|${e.item_name}|${e.weight_kg}|${e.rate_per_kg}|${day}`;
     const list = groups.get(key);
     if (list) {
       list.push(e);
@@ -517,8 +594,13 @@ export function generateBill(
       }
     }
 
-    const subtotal = floorMoney(pendingEntries.reduce((sum, e) => sum + e.line_total, 0));
-    const paymentsTotal = floorMoney(pendingPayments.reduce((sum, p) => sum + p.amount, 0));
+    // Signed: for a shopkeeper, sales count negative (see entrySign), so
+    // `subtotal` is "purchases - sales" - the net amount this bill adds to
+    // what the shop owes them. For every other party it's the plain sum.
+    const subtotal = signedEntriesTotal(partyType, pendingEntries);
+    // Net effect of the attached payments on the due (negative for the
+    // usual shop-paid-them payment, positive for one they paid the shop).
+    const paymentsEffect = paymentsEffectTotal(pendingPayments);
 
     // "Previous due" is the true balance from BEFORE any currently-unbilled
     // activity existed - current_due, backing out ALL unbilled entries
@@ -527,9 +609,9 @@ export function generateBill(
     // recorded, so undoing that effect means adding them back). That way
     // it's the same number no matter which subset of either gets picked
     // for this specific bill.
-    const allUnbilledEntriesTotal = floorMoney(allPendingEntries.reduce((sum, e) => sum + e.line_total, 0));
-    const allUnbilledPaymentsTotal = floorMoney(allPendingPayments.reduce((sum, p) => sum + p.amount, 0));
-    const previousDue = floorMoney(party.current_due - allUnbilledEntriesTotal + allUnbilledPaymentsTotal);
+    const allUnbilledEntriesTotal = signedEntriesTotal(partyType, allPendingEntries);
+    const allUnbilledPaymentsEffect = paymentsEffectTotal(allPendingPayments);
+    const previousDue = floorMoney(party.current_due - allUnbilledEntriesTotal - allUnbilledPaymentsEffect);
     // This bill's own total is scoped to what it actually contains -
     // previous balance plus only the entries selected for it - not the
     // party's full current_due, which may still include other unbilled
@@ -538,7 +620,7 @@ export function generateBill(
     // Remaining due after whatever payments are being attached to this
     // bill (pre-existing, selected just above - not a new payment; a
     // payment already reduced current_due when it was originally recorded).
-    const remainingDue = floorMoney(totalDueAfterBill - paymentsTotal);
+    const remainingDue = floorMoney(totalDueAfterBill + paymentsEffect);
 
     const now = pakistanNow();
     const billDate = `${now.date} ${now.time}`;
@@ -646,9 +728,16 @@ export function recordPayment(
   billId: number | null = null,
   note: string | null = null,
   paymentMethod: PaymentMethod | null = null,
-  paymentDate?: string
+  paymentDate?: string,
+  direction: PaymentDirection = 'out'
 ): Payment {
   if (amount <= 0) throw new Error('Payment amount must be positive');
+  if (direction !== 'out' && direction !== 'in') {
+    throw new Error("Payment direction must be 'out' or 'in'");
+  }
+  if (direction === 'in' && partyType !== 'shopkeeper') {
+    throw new Error('Only a shopkeeper can pay money in - other parties are paid, or pay, in one fixed direction');
+  }
   if (paymentDate !== undefined && !DATE_ONLY_RE.test(paymentDate)) {
     throw new Error("paymentDate must be in 'YYYY-MM-DD' format");
   }
@@ -662,12 +751,12 @@ export function recordPayment(
     // time - never a placeholder, even for a backdated payment.
     const paidAt = `${paymentDate ?? now.date} ${now.time}`;
     const insertPayment = db.prepare(
-      `INSERT INTO payments (party_type, party_id, bill_id, amount, payment_method, note, paid_at) VALUES (?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO payments (party_type, party_id, bill_id, amount, payment_method, note, paid_at, direction) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
     );
-    const result = insertPayment.run(partyType, partyId, billId, amount, paymentMethod, note, paidAt);
+    const result = insertPayment.run(partyType, partyId, billId, amount, paymentMethod, note, paidAt, direction);
 
     const party = getParty(db, partyType, partyId);
-    const newDue = floorMoney(party.current_due - amount);
+    const newDue = floorMoney(party.current_due + paymentDueEffect({ amount, direction }));
     db.prepare(`UPDATE ${t.party} SET current_due = ? WHERE id = ?`).run(newDue, partyId);
 
     return db.prepare('SELECT * FROM payments WHERE id = ?').get(result.lastInsertRowid) as Payment;
@@ -733,7 +822,11 @@ export function updatePayment(
     );
 
     const party = getParty(db, partyType, partyId);
-    const newDue = floorMoney(party.current_due + existing.amount - newAmount);
+    // Direction isn't editable (delete and re-add to flip it), so only the
+    // amount changes: undo the old effect, apply the new one.
+    const newDue = floorMoney(
+      party.current_due - paymentDueEffect(existing) + paymentDueEffect({ amount: newAmount, direction: existing.direction })
+    );
     db.prepare(`UPDATE ${t.party} SET current_due = ? WHERE id = ?`).run(newDue, partyId);
   })();
 }
@@ -758,7 +851,7 @@ export function deletePayment(db: Database.Database, partyType: PartyType, party
     db.prepare('DELETE FROM payments WHERE id = ?').run(paymentId);
 
     const party = getParty(db, partyType, partyId);
-    const newDue = floorMoney(party.current_due + existing.amount);
+    const newDue = floorMoney(party.current_due - paymentDueEffect(existing));
     db.prepare(`UPDATE ${t.party} SET current_due = ? WHERE id = ?`).run(newDue, partyId);
   })();
 }

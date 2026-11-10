@@ -29,6 +29,12 @@ import type {
   ListDailyLedgersRequest,
   GetMonthlySummaryRequest,
   GetWeightRangeRequest,
+  GetShopkeeperTotalsRequest,
+  AddCounterSaleEntryRequest,
+  DeleteCounterSaleEntryRequest,
+  GenerateCounterSaleBillRequest,
+  ListCounterSaleBillsRequest,
+  GetCounterSaleBillRequest,
 } from '../shared/ipc';
 import {
   createParty,
@@ -36,6 +42,7 @@ import {
   getAllParties,
   getAllPartiesWithActivity,
   getWeightInDateRange,
+  getShopkeeperTotals,
   deleteParty,
   forceDeleteParty,
   addEntry,
@@ -53,6 +60,14 @@ import {
   getPayments,
 } from './services/partyService';
 import { listAllBills } from './services/billService';
+import {
+  addCounterSaleEntry,
+  deleteCounterSaleEntry,
+  listPendingCounterSaleEntries,
+  generateCounterSaleBill,
+  listCounterSaleBillsForDate,
+  getCounterSaleBill,
+} from './services/counterSaleService';
 import {
   createDailyLedger,
   getDailyLedger,
@@ -93,6 +108,34 @@ export function registerIpcHandlers(db: Database.Database): void {
     return getWeightInDateRange(db, req.partyType, req.partyId, req.fromDate, req.toDate);
   });
 
+  guardedHandle(IpcChannels.PARTY_SHOPKEEPER_TOTALS, (_event, req: GetShopkeeperTotalsRequest) => {
+    return getShopkeeperTotals(db, req.shopkeeperId);
+  });
+
+  guardedHandle(IpcChannels.COUNTER_SALE_ADD, (_event, req: AddCounterSaleEntryRequest) => {
+    return addCounterSaleEntry(db, req);
+  });
+
+  guardedHandle(IpcChannels.COUNTER_SALE_DELETE, (_event, req: DeleteCounterSaleEntryRequest) => {
+    deleteCounterSaleEntry(db, req.entryId);
+  });
+
+  guardedHandle(IpcChannels.COUNTER_SALE_LIST_PENDING, () => {
+    return listPendingCounterSaleEntries(db);
+  });
+
+  guardedHandle(IpcChannels.COUNTER_SALE_GENERATE_BILL, (_event, req: GenerateCounterSaleBillRequest) => {
+    return generateCounterSaleBill(db, req.entryIds);
+  });
+
+  guardedHandle(IpcChannels.COUNTER_SALE_LIST_BILLS, (_event, req: ListCounterSaleBillsRequest) => {
+    return listCounterSaleBillsForDate(db, req.date);
+  });
+
+  guardedHandle(IpcChannels.COUNTER_SALE_GET_BILL, (_event, req: GetCounterSaleBillRequest) => {
+    return getCounterSaleBill(db, req.billId);
+  });
+
   guardedHandle(IpcChannels.PARTY_DELETE, (_event, req: DeletePartyRequest) => {
     deleteParty(db, req.partyType, req.partyId);
   });
@@ -110,7 +153,8 @@ export function registerIpcHandlers(db: Database.Database): void {
       req.weightKg,
       req.ratePerKg,
       req.entryDate,
-      req.confirmDuplicate ?? false
+      req.confirmDuplicate ?? false,
+      req.entryType ?? 'purchase'
     );
   });
 
@@ -143,7 +187,8 @@ export function registerIpcHandlers(db: Database.Database): void {
       req.billId ?? null,
       req.note ?? null,
       req.paymentMethod ?? null,
-      req.paymentDate
+      req.paymentDate,
+      req.direction ?? 'out'
     );
   });
 

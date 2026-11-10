@@ -26,6 +26,23 @@ export function formatDue(amount: number): { text: string; kind: 'due' | 'credit
   return { text: `${formatRs(Math.abs(floored))} credit`, kind: 'credit' };
 }
 
+// A shopkeeper's balance, in plain words. Their due is stored the same way
+// as everyone's (positive = the shop owes them), but for a shopkeeper who
+// both buys from and sells to the shop the useful question is "who owes
+// whom": a negative due means THEY owe the shop - receivable, shown green;
+// a positive due means the shop owes THEM - payable, shown red. 'credit' and
+// 'due' are the existing green/red colour kinds.
+export function formatShopkeeperBalance(due: number): {
+  text: string;
+  label: string;
+  kind: 'due' | 'credit' | 'clear';
+} {
+  const floored = Math.floor(due);
+  if (floored === 0) return { text: formatRs(0), label: 'Settled up', kind: 'clear' };
+  if (floored < 0) return { text: formatRs(Math.abs(floored)), label: 'Receivable \u2014 they owe you', kind: 'credit' };
+  return { text: formatRs(floored), label: 'Payable \u2014 you owe them', kind: 'due' };
+}
+
 // Profit/Loss is never shown as a bare signed number - the shopkeeper
 // should always see the word "PROFIT" or "LOSS" spelled out (spec: "Do not
 // merely display a negative number without identifying it as a loss").

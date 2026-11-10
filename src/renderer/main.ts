@@ -8,6 +8,7 @@ import { renderBillsList } from './views/billsList';
 import { renderPlaceholder } from './views/placeholder';
 import { renderDailyLedger } from './views/dailyLedger';
 import { renderDailyLedgerHistory } from './views/dailyLedgerHistory';
+import { renderCounterSale, renderCounterSaleBill } from './views/counterSale';
 import { renderSettings } from './views/settings';
 import { showLockScreen } from './views/lockScreen';
 import { errorBanner, errorMessage } from './components';
@@ -89,6 +90,23 @@ function startApp(appRoot: HTMLElement): void {
 
   route('/ledger/:date', (params, el) => {
     renderDailyLedger(params.date, el);
+  });
+
+  route('/counter-sale', (_params, el) => {
+    renderCounterSale(todayIso(), el);
+  });
+
+  route('/counter-sale/bill/:id', (params, el) => {
+    const id = Number(params.id);
+    if (!Number.isInteger(id)) {
+      renderPlaceholder(el, 'Bill not found', 'That bill link doesn\u2019t look right.');
+      return;
+    }
+    renderCounterSaleBill(id, el);
+  });
+
+  route('/counter-sale/:date', (params, el) => {
+    renderCounterSale(params.date, el);
   });
 
   route('/bills', (_params, el) => {

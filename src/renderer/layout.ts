@@ -12,6 +12,7 @@ const NAV_ITEMS: NavItem[] = [
   { path: '/shopkeepers', label: 'Shopkeepers', icon: '🏪' },
   { path: '/customers', label: 'Customers / Khata', icon: '👥' },
   { path: '/waste-customers', label: 'Waste Customers', icon: '♻' },
+  { path: '/counter-sale', label: 'Counter Sale', icon: '🛒' },
   { path: '/ledger', label: 'Daily Ledger', icon: '📒' },
   { path: '/bills', label: 'Bills', icon: '🧾' },
   { path: '/settings', label: 'Settings / Backup', icon: '⚙' },

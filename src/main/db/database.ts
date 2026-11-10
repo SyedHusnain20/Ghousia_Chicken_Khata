@@ -80,6 +80,19 @@ function runMigrations(db: Database.Database): void {
     `);
   }
 
+  // Shopkeeper sales + payment direction (added together). Plain ADD COLUMN
+  // is enough - both have a constant default, so every existing row becomes
+  // a purchase / an 'out' payment, which is exactly what it was. Placed
+  // after the payments rebuild above so a rebuilt table gets it too.
+  const shopkeeperEntryColumns = db.prepare('PRAGMA table_info(shopkeeper_entries)').all() as { name: string }[];
+  if (!shopkeeperEntryColumns.some((c) => c.name === 'entry_type')) {
+    db.exec("ALTER TABLE shopkeeper_entries ADD COLUMN entry_type TEXT NOT NULL DEFAULT 'purchase'");
+  }
+  const paymentColumnsNow = db.prepare('PRAGMA table_info(payments)').all() as { name: string }[];
+  if (!paymentColumnsNow.some((c) => c.name === 'direction')) {
+    db.exec("ALTER TABLE payments ADD COLUMN direction TEXT NOT NULL DEFAULT 'out'");
+  }
+
   // daily_ledgers: old databases have "cash_customer_income" (REAL) and no
   // Items Left columns at all. A rebuild is required here (not just
   // RENAME/ADD COLUMN) because the money columns also need to go from REAL

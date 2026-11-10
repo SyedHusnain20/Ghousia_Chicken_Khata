@@ -9,6 +9,10 @@ import {
   RestoreBillResult,
   Payment,
   PaymentMethod,
+  PaymentDirection,
+  EntryType,
+  CounterSaleEntry,
+  CounterSaleBill,
   DailyLedger,
   DailyLedgerDetail,
   DailyLedgerSummary,
@@ -26,6 +30,7 @@ export const IpcChannels = {
   PARTY_LIST: 'party:list',
   PARTY_LIST_WITH_ACTIVITY: 'party:list-with-activity',
   PARTY_WEIGHT_RANGE: 'party:weight-range',
+  PARTY_SHOPKEEPER_TOTALS: 'party:shopkeeper-totals',
   PARTY_DELETE: 'party:delete',
   PARTY_FORCE_DELETE: 'party:force-delete',
   ENTRY_ADD: 'entry:add',
@@ -48,6 +53,12 @@ export const IpcChannels = {
   DAILY_LEDGER_SAVE_UDHARS: 'daily-ledger:save-udhars',
   DAILY_LEDGER_LIST: 'daily-ledger:list',
   DAILY_LEDGER_MONTHLY_SUMMARY: 'daily-ledger:monthly-summary',
+  COUNTER_SALE_ADD: 'counter-sale:add',
+  COUNTER_SALE_DELETE: 'counter-sale:delete',
+  COUNTER_SALE_LIST_PENDING: 'counter-sale:list-pending',
+  COUNTER_SALE_GENERATE_BILL: 'counter-sale:generate-bill',
+  COUNTER_SALE_LIST_BILLS: 'counter-sale:list-bills',
+  COUNTER_SALE_GET_BILL: 'counter-sale:get-bill',
   STORAGE_GET_INFO: 'storage:get-info',
   STORAGE_CHOOSE_FOLDER: 'storage:choose-folder',
   STORAGE_CONFIRM_CHANGE: 'storage:confirm-change',
@@ -102,6 +113,9 @@ export interface AddEntryRequest {
   // rate/date already logged) and confirmed they want to add it again.
   // Omit/false on the first attempt.
   confirmDuplicate?: boolean;
+  // Shopkeepers only: 'sale' (they bought from the shop) or 'purchase' (the
+  // shop bought from them). Omit for everyone else / defaults to 'purchase'.
+  entryType?: EntryType;
 }
 
 export interface UpdateEntryRequest {
@@ -158,6 +172,9 @@ export interface RecordPaymentRequest {
   note?: string | null;
   paymentMethod?: PaymentMethod | null;
   paymentDate?: string; // 'YYYY-MM-DD' - omit to use today
+  // 'out' (default) = the shop paid the party; 'in' = the party paid the
+  // shop. 'in' is only accepted for shopkeepers.
+  direction?: PaymentDirection;
 }
 
 export interface UpdatePaymentRequest {
@@ -293,6 +310,40 @@ export interface GetWeightRangeRequest {
   toDate: string;
 }
 
+export interface GetShopkeeperTotalsRequest {
+  shopkeeperId: number;
+}
+
+export interface ShopkeeperTotalsResponse {
+  total_sale: number;
+  total_purchase: number;
+}
+
+export interface AddCounterSaleEntryRequest {
+  customerName?: string | null;
+  customerNumber?: string | null;
+  itemName: string;
+  weightKg: number;
+  ratePerKg: number;
+  entryDate?: string; // 'YYYY-MM-DD' - omit to use today
+}
+
+export interface DeleteCounterSaleEntryRequest {
+  entryId: number;
+}
+
+export interface GenerateCounterSaleBillRequest {
+  entryIds?: number[]; // omit to bill every pending entry
+}
+
+export interface ListCounterSaleBillsRequest {
+  date: string; // 'YYYY-MM-DD'
+}
+
+export interface GetCounterSaleBillRequest {
+  billId: number;
+}
+
 export interface StorageInfo {
   dbFolderPath: string;
   dbFilePath: string;
@@ -370,6 +421,16 @@ export interface KhataApi {
   listDailyLedgers(req: ListDailyLedgersRequest): Promise<DailyLedgerSummary[]>;
   getMonthlySummary(req: GetMonthlySummaryRequest): Promise<MonthlySummary>;
   getWeightInDateRange(req: GetWeightRangeRequest): Promise<WeightRangeReport>;
+  // Lifetime sale and purchase totals for a shopkeeper (profile header).
+  getShopkeeperTotals(req: GetShopkeeperTotalsRequest): Promise<ShopkeeperTotalsResponse>;
+  // Counter Sale (walk-in sales). Entirely separate from parties, the Daily
+  // Ledger and profit/loss.
+  addCounterSaleEntry(req: AddCounterSaleEntryRequest): Promise<number>;
+  deleteCounterSaleEntry(req: DeleteCounterSaleEntryRequest): Promise<void>;
+  listPendingCounterSaleEntries(): Promise<CounterSaleEntry[]>;
+  generateCounterSaleBill(req: GenerateCounterSaleBillRequest): Promise<CounterSaleBill>;
+  listCounterSaleBills(req: ListCounterSaleBillsRequest): Promise<CounterSaleBill[]>;
+  getCounterSaleBill(req: GetCounterSaleBillRequest): Promise<CounterSaleBill>;
   getStorageInfo(): Promise<StorageInfo>;
   // Opens a native folder-picker dialog. Resolves to null if cancelled.
   chooseStorageFolder(): Promise<ChooseFolderResult | null>;

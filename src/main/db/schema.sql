@@ -118,7 +118,10 @@ CREATE TABLE IF NOT EXISTS shopkeeper_entries (
   weight_kg     REAL NOT NULL,
   rate_per_kg   REAL NOT NULL,
   line_total    REAL NOT NULL,
-  bill_id       INTEGER REFERENCES shopkeeper_bills(id)
+  bill_id       INTEGER REFERENCES shopkeeper_bills(id),
+  -- A shopkeeper can be bought from ('purchase', pushes the due up) or sold
+  -- to ('sale', pulls it down). Rows from before sales existed are purchases.
+  entry_type    TEXT NOT NULL DEFAULT 'purchase'
 );
 
 CREATE TABLE IF NOT EXISTS waste_customer_entries (
@@ -145,7 +148,8 @@ CREATE TABLE IF NOT EXISTS payments (
   amount         REAL NOT NULL,
   payment_method TEXT,                -- 'online' | 'cash' - nullable so old payments (recorded before this field existed) just show blank, not a fake default
   paid_at        TEXT NOT NULL DEFAULT (datetime('now')),
-  note           TEXT
+  note           TEXT,
+  direction      TEXT NOT NULL DEFAULT 'out'   -- 'out' = shop paid the party, 'in' = party paid the shop (shopkeepers only)
 );
 
 CREATE INDEX IF NOT EXISTS idx_supplier_entries_unbilled
@@ -211,3 +215,30 @@ CREATE INDEX IF NOT EXISTS idx_supplier_entries_date ON supplier_entries (entry_
 CREATE INDEX IF NOT EXISTS idx_customer_entries_date ON customer_entries (entry_date);
 CREATE INDEX IF NOT EXISTS idx_shopkeeper_entries_date ON shopkeeper_entries (entry_date);
 CREATE INDEX IF NOT EXISTS idx_waste_customer_entries_date ON waste_customer_entries (entry_date);
+
+-- Counter Sale: walk-in sales, no party, no due, no payments. These tables
+-- are intentionally standalone - nothing in the Daily Ledger, profit/loss,
+-- the global Bills list or any party balance ever reads them. Entries sit
+-- with bill_id NULL until the shopkeeper generates a bill for them.
+CREATE TABLE IF NOT EXISTS counter_sale_bills (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  bill_date       TEXT NOT NULL,            -- 'YYYY-MM-DD HH:MM:SS' (date part = the sale date)
+  customer_name   TEXT,
+  customer_number TEXT,
+  total           REAL NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS counter_sale_entries (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  entry_date      TEXT NOT NULL,
+  customer_name   TEXT,
+  customer_number TEXT,
+  item_name       TEXT NOT NULL,
+  weight_kg       REAL NOT NULL,
+  rate_per_kg     REAL NOT NULL,
+  line_total      REAL NOT NULL,
+  bill_id         INTEGER REFERENCES counter_sale_bills(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_counter_sale_bills_date ON counter_sale_bills (bill_date);
+CREATE INDEX IF NOT EXISTS idx_counter_sale_entries_bill ON counter_sale_entries (bill_id);

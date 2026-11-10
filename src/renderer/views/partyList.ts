@@ -1,5 +1,5 @@
 import { el, mount } from '../dom';
-import { formatDate, formatDue } from '../format';
+import { formatDate, formatDue, formatShopkeeperBalance } from '../format';
 import { button, emptyState, errorBanner, errorMessage, loadingState, pageHeader, successBanner } from '../components';
 import { navigate } from '../router';
 import { isCustomerLike, partyProfilePath } from '../partyPaths';
@@ -17,7 +17,7 @@ const COPY: Record<PartyType, { title: string; singular: string; addLabel: strin
     title: 'Shopkeepers',
     singular: 'shopkeeper',
     addLabel: 'Add Shopkeeper',
-    dueLabel: 'You owe',
+    dueLabel: 'Balance',
     contactHint: 'e.g. 0300-1234567',
   },
   customer: {
@@ -56,7 +56,15 @@ function renderTable(
   }
 
   const rows = parties.map((party) => {
-    const due = formatDue(party.current_due);
+    // Shopkeepers read as receivable (green) / payable (red); everyone else
+    // keeps the plain due/credit wording.
+    const due =
+      partyType === 'shopkeeper'
+        ? (() => {
+            const b = formatShopkeeperBalance(party.current_due);
+            return { kind: b.kind, text: b.kind === 'clear' ? b.text : `${b.text} ${b.kind === 'credit' ? 'receivable' : 'payable'}` };
+          })()
+        : formatDue(party.current_due);
     const row = el('tr', { class: 'clickable-row', tabindex: '0' }, [
       el('td', { class: 'cell-name' }, [party.name]),
       el('td', { class: 'cell-muted' }, [party.contact_number || '\u2014']),

@@ -4,7 +4,8 @@ import { button, confirmDialog, errorBanner, errorMessage, ipcErrorMessage, load
 import { navigate } from '../router';
 import { partyProfilePath } from '../partyPaths';
 import { SHOP_NAME_EN, SHOP_NAME_UR } from '../shopConfig';
-import type { BillDetail, PartyType } from '../../main/types';
+import type { BillDetail, Entry, PartyType } from '../../main/types';
+import { summarizeShopkeeperBill, shopkeeperBalance } from '../../shared/shopkeeperBill';
 
 const TITLE: Record<PartyType, string> = {
   supplier: 'Supplier Bill',
@@ -41,7 +42,7 @@ function receiptMarkup(bill: BillDetail): HTMLElement {
     ])
   );
 
-  return el('div', { class: 'receipt', id: 'receipt-print-area' }, [
+  const header = [
     el('div', { class: 'receipt-header' }, [
       el('div', { class: 'receipt-shop-ur', dir: 'rtl', lang: 'ur' }, [SHOP_NAME_UR]),
       el('div', { class: 'receipt-shop-en' }, [SHOP_NAME_EN]),
@@ -55,6 +56,9 @@ function receiptMarkup(bill: BillDetail): HTMLElement {
         ? el('div', {}, [el('span', {}, ['Contact']), el('span', {}, [bill.party_contact])])
         : null,
     ]),
+  ];
+
+  const standardBody = [
     el('table', { class: 'receipt-items' }, [
       el('thead', {}, [
         el('tr', {}, [
@@ -97,12 +101,91 @@ function receiptMarkup(bill: BillDetail): HTMLElement {
           ]),
         ])
       : null,
-    el('div', { class: 'receipt-footer' }, [
-      el('div', {}, ['Powered by R&R Digital Solutions']),
-      el('div', {}, ['Contact: 03126641281']),
-      el('div', {}, ['www.hasnainzainulabdin.vercel.app']),
-    ]),
+  ];
+
+  const footer = el('div', { class: 'receipt-footer' }, [
+    el('div', {}, ['Powered by R&R Digital Solutions']),
+    el('div', {}, ['Contact: 03126641281']),
+    el('div', {}, ['www.hasnainzainulabdin.vercel.app']),
   ]);
+
+  return el('div', { class: 'receipt', id: 'receipt-print-area' }, [
+    ...header,
+    ...(bill.party_type === 'shopkeeper' ? shopkeeperBody(bill) : standardBody),
+    footer,
+  ]);
+}
+
+// "Rs. 1,000 receivable" / "Rs. 1,000 payable" / "Rs. 0" - a shopkeeper's
+// balance in words, coloured green (they owe you) or red (you owe them).
+function balanceRow(label: string, due: number, extraClass = ''): HTMLElement {
+  const b = shopkeeperBalance(due);
+  const word = b.kind === 'receivable' ? ' receivable' : b.kind === 'payable' ? ' payable' : '';
+  return el('div', { class: `receipt-total-row receipt-balance-${b.kind} ${extraClass}`.trim() }, [
+    el('span', {}, [label]),
+    el('span', {}, [`${formatRs(b.amount)}${word}`]),
+  ]);
+}
+
+function shopkeeperEntriesTable(label: string, entries: Entry[], totalLabel: string, total: number): HTMLElement {
+  return el('div', { class: 'receipt-section' }, [
+    el('div', { class: 'receipt-section-label' }, [label]),
+    el('table', { class: 'receipt-items' }, [
+      el('thead', {}, [
+        el('tr', {}, [
+          el('th', {}, ['Date']),
+          el('th', {}, ['Item']),
+          el('th', { class: 'th-right' }, ['KG']),
+          el('th', { class: 'th-right' }, ['Rate']),
+          el('th', { class: 'th-right' }, ['Total']),
+        ]),
+      ]),
+      el(
+        'tbody',
+        {},
+        entries.map((item) =>
+          el('tr', {}, [
+            el('td', {}, [formatDateShort(item.entry_date)]),
+            el('td', {}, [item.item_name]),
+            el('td', { class: 'cell-number' }, [String(item.weight_kg)]),
+            el('td', { class: 'cell-number' }, [formatRs(item.rate_per_kg)]),
+            el('td', { class: 'cell-number' }, [formatRs(item.line_total)]),
+          ])
+        )
+      ),
+    ]),
+    el('div', { class: 'receipt-total-row receipt-section-total' }, [el('span', {}, [totalLabel]), el('span', {}, [formatRs(total)])]),
+  ]);
+}
+
+// Shopkeeper bill: every sale and its total, then every purchase and its
+// total, then the summary - total sale, total purchased, previous due,
+// payments (if any) and the remaining amount. Balances are receivable
+// (green) when the shopkeeper owes the shop, payable (red) when the shop
+// owes them.
+function shopkeeperBody(bill: BillDetail): HTMLElement[] {
+  const { sales, purchases, totalSale, totalPurchase } = summarizeShopkeeperBill(bill);
+
+  const paymentRows = bill.payments.map((p) => {
+    const who = p.direction === 'in' ? 'They paid' : 'You paid';
+    const how = p.payment_method ? PAYMENT_METHOD_LABEL[p.payment_method] : '\u2014';
+    return el('div', { class: 'receipt-total-row' }, [
+      el('span', {}, [`${who} (${how}, ${formatDateShort(p.paid_at)})`]),
+      el('span', {}, [formatRs(p.amount)]),
+    ]);
+  });
+
+  return [
+    sales.length > 0 ? shopkeeperEntriesTable('Sales', sales, 'Total sales', totalSale) : null,
+    purchases.length > 0 ? shopkeeperEntriesTable('Purchases', purchases, 'Total purchases', totalPurchase) : null,
+    el('div', { class: 'receipt-totals' }, [
+      el('div', { class: 'receipt-total-row' }, [el('span', {}, ['Total sale']), el('span', {}, [formatRs(totalSale)])]),
+      el('div', { class: 'receipt-total-row' }, [el('span', {}, ['Total purchased']), el('span', {}, [formatRs(totalPurchase)])]),
+      balanceRow('Previous due', bill.previous_due),
+      ...paymentRows,
+      balanceRow('Remaining', bill.remaining_due, 'receipt-total-grand'),
+    ]),
+  ].filter((x): x is HTMLElement => x !== null);
 }
 
 // "3 entries and 2 payments" / "1 entry" / "2 payments" - leaves out whichever

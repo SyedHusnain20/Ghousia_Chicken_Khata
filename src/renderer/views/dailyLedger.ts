@@ -656,9 +656,9 @@ export async function renderDailyLedger(ledgerDate: string, container: HTMLEleme
           el('h2', {}, ['Income']),
           partyEntriesTable(
             detail.khata_sales,
-            'Customer',
+            'Customer / Shopkeeper',
             'Khata Sales Total',
-            'No Khata customer sales recorded for this date.'
+            'No Khata customer or shopkeeper sales recorded for this date.'
           ),
           totalLine('Sale', detail.sale_income),
           totalLine('Items Left', detail.items_left_total),

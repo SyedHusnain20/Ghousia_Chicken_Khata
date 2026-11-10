@@ -1,9 +1,10 @@
 import { el, mount } from '../dom';
-import { formatDate, formatDue, formatRs, formatDateTime, todayIso } from '../format';
-import { confirmDialog, emptyState, errorBanner, errorMessage, loadingState } from '../components';
+import { formatDate, formatDue, formatRs, formatDateTime, formatShopkeeperBalance, todayIso } from '../format';
+import { confirmDialog, emptyState, errorBanner, errorMessage, itemSelect, loadingState } from '../components';
 import { navigate } from '../router';
 import { isCustomerLike } from '../partyPaths';
-import type { BillListItem, Entry, Party, PartyType, Payment, WeightRangeReport } from '../../main/types';
+import type { BillListItem, Entry, EntryType, Party, PartyType, Payment, PaymentDirection, WeightRangeReport } from '../../main/types';
+import type { ShopkeeperTotalsResponse } from '../../shared/ipc';
 
 // Floors to a whole rupee, without pulling in main's floorMoney (that
 // helper lives in a file that imports better-sqlite3 - fine for main, but
@@ -129,7 +130,42 @@ function deletePartyControls(party: Party, partyType: PartyType): HTMLElement {
   ]);
 }
 
-function dueHero(party: Party, partyType: PartyType): HTMLElement {
+function dueHero(party: Party, partyType: PartyType, totals: ShopkeeperTotalsResponse | null): HTMLElement {
+  // Shopkeepers both buy from and sell to the shop, so their balance is
+  // "receivable" (they owe you - green) or "payable" (you owe them - red)
+  // rather than a plain due. It sits right at the top of their profile.
+  if (partyType === 'shopkeeper') {
+    const bal = formatShopkeeperBalance(party.current_due);
+    const net = totals ? totals.total_sale - totals.total_purchase : null;
+    const breakdown: HTMLElement[] = [];
+    if (totals && net !== null) {
+      breakdown.push(
+        el('div', { class: 'due-hero-contact' }, [
+          `Total sale ${formatRs(totals.total_sale)} \u2212 Total purchase ${formatRs(totals.total_purchase)} = ` +
+            `${net < 0 ? '\u2212' : ''}${formatRs(Math.abs(net))}`,
+        ])
+      );
+      if (Math.floor(-party.current_due) !== net) {
+        breakdown.push(
+          el('div', { class: 'due-hero-contact' }, [
+            'The balance shown also includes any opening balance and payments.',
+          ])
+        );
+      }
+    }
+    return el('div', { class: `due-hero due-hero-${bal.kind}` }, [
+      el('div', { class: 'due-hero-info' }, [
+        el('h1', {}, [party.name]),
+        el('div', { class: 'due-hero-contact' }, [party.contact_number || 'No contact number on file']),
+        ...breakdown,
+      ]),
+      el('div', { class: 'due-hero-amount' }, [
+        el('span', { class: 'due-hero-label' }, [bal.label]),
+        el('span', { class: 'due-hero-value' }, [bal.text]),
+      ]),
+    ]);
+  }
+
   const due = formatDue(party.current_due);
   const label = isCustomerLike(partyType) ? 'Owes you' : 'You owe';
   return el('div', { class: `due-hero due-hero-${due.kind}` }, [
@@ -262,9 +298,14 @@ function duplicateWarningMessage(err: unknown): string | null {
   return msg.slice(idx + DUPLICATE_ENTRY_MARKER.length);
 }
 
-function addEntryForm(partyType: PartyType, partyId: number, onSaved: () => void): HTMLElement {
-  const copy = COPY[partyType];
-  const itemInput = el('input', { type: 'text', value: 'Chicken', maxlength: '60' }) as HTMLInputElement;
+function addEntryForm(
+  partyType: PartyType,
+  partyId: number,
+  onSaved: () => void,
+  entryType: EntryType = 'purchase',
+  submitLabel: string = COPY[partyType].entryVerb
+): HTMLElement {
+  const itemInput = itemSelect();
   const kgInput = el('input', { type: 'number', step: '0.01', min: '0', placeholder: '0' }) as HTMLInputElement;
   const rateInput = el('input', { type: 'number', step: '0.01', min: '0', placeholder: '0' }) as HTMLInputElement;
   const dateInput = el('input', { type: 'date', value: todayIso() }) as HTMLInputElement;
@@ -290,7 +331,7 @@ function addEntryForm(partyType: PartyType, partyId: number, onSaved: () => void
     el('div', { class: 'total-preview-row' }, ['Total: ', totalPreview]),
     errorSlot,
     el('div', { class: 'form-actions' }, [
-      el('button', { class: 'btn btn-primary', type: 'submit' }, [copy.entryVerb]),
+      el('button', { class: 'btn btn-primary', type: 'submit' }, [submitLabel]),
     ]),
   ]);
 
@@ -326,11 +367,12 @@ function addEntryForm(partyType: PartyType, partyId: number, onSaved: () => void
         await window.khata.addEntry({
           partyType,
           partyId,
-          itemName: itemInput.value.trim() || 'Chicken',
+          itemName: itemInput.value,
           weightKg,
           ratePerKg,
           entryDate: dateInput.value,
           confirmDuplicate,
+          entryType,
         });
         kgInput.value = '';
         rateInput.value = '';
@@ -362,14 +404,31 @@ function paymentForm(partyType: PartyType, partyId: number, currentDue: number, 
   const amountInput = el('input', { type: 'number', step: '0.01', min: '0.01', placeholder: '0' }) as HTMLInputElement;
   const errorSlot = el('div', { class: 'form-error-slot' });
 
+  // Shopkeepers can end up owing the shop (after a sale), so a payment can
+  // go either way: you pay them, or they pay you. Defaults to whichever
+  // fits the current balance.
+  const isShopkeeper = partyType === 'shopkeeper';
+  const directionSelect = el('select', {}, [
+    el('option', { value: 'out' }, ['I paid them']),
+    el('option', { value: 'in' }, ['They paid me']),
+  ]) as HTMLSelectElement;
+  directionSelect.value = currentDue < 0 ? 'in' : 'out';
+
   const hint = el('p', { class: 'field-hint' }, [
-    currentDue > 0
-      ? `Current due is ${formatRs(currentDue)}. Entering an amount reduces it right away.`
-      : 'There is no outstanding due right now. A payment here will create a credit balance.',
+    isShopkeeper
+      ? currentDue > 0
+        ? `You owe them ${formatRs(currentDue)}. Choose \u201cI paid them\u201d to reduce it.`
+        : currentDue < 0
+          ? `They owe you ${formatRs(Math.abs(currentDue))}. Choose \u201cThey paid me\u201d when they pay you.`
+          : 'Nothing is owed either way right now.'
+      : currentDue > 0
+        ? `Current due is ${formatRs(currentDue)}. Entering an amount reduces it right away.`
+        : 'There is no outstanding due right now. A payment here will create a credit balance.',
   ]);
 
   const form = el('form', { class: 'inline-form' }, [
     el('div', { class: 'form-grid form-grid-tight' }, [
+      isShopkeeper ? el('label', {}, ['Direction', directionSelect]) : null,
       el('label', {}, ['Method', methodSelect]),
       el('label', {}, ['Date', dateInput]),
       el('label', {}, ['Amount (Rs.)', amountInput]),
@@ -403,6 +462,7 @@ function paymentForm(partyType: PartyType, partyId: number, currentDue: number, 
         note: 'Standalone payment',
         paymentMethod: methodSelect.value as 'online' | 'cash',
         paymentDate: dateInput.value,
+        direction: (isShopkeeper ? directionSelect.value : 'out') as PaymentDirection,
       });
       amountInput.value = '';
       onSaved();
@@ -422,7 +482,7 @@ function entryEditRow(
   partyId: number,
   onDone: (changed: boolean) => void
 ): HTMLElement {
-  const itemInput = el('input', { type: 'text', value: entry.item_name, maxlength: '60' }) as HTMLInputElement;
+  const itemInput = itemSelect(entry.item_name);
   const kgInput = el('input', {
     type: 'number',
     step: '0.01',
@@ -471,7 +531,7 @@ function entryEditRow(
         partyType,
         partyId,
         entryId: entry.id,
-        itemName: itemInput.value.trim() || 'Chicken',
+        itemName: itemInput.value,
         weightKg,
         ratePerKg,
         entryDate: dateInput.value,
@@ -629,7 +689,9 @@ function paymentsTable(payments: Payment[]): HTMLElement {
   const rows = payments.map((p) =>
     el('tr', {}, [
       el('td', {}, [formatDateTime(p.paid_at)]),
-      el('td', { class: 'cell-muted' }, [p.payment_method ? methodLabel[p.payment_method] : '\u2014']),
+      el('td', { class: 'cell-muted' }, [
+        (p.payment_method ? methodLabel[p.payment_method] : '\u2014') + (p.direction === 'in' ? ' \u00b7 received' : ''),
+      ]),
       el('td', { class: 'cell-number cell-strong' }, [formatRs(p.amount)]),
       el('td', { class: 'cell-muted' }, [p.bill_id ? `Bill #${p.bill_id}` : p.note || 'Standalone']),
     ])
@@ -814,7 +876,9 @@ function renderPaymentsUnbilledTable(
       deleteBtn.addEventListener('click', async () => {
         const confirmed = await confirmDialog(
           `Delete this ${payment.payment_method ? PAYMENT_METHOD_LABEL[payment.payment_method].toLowerCase() + ' ' : ''}payment of ${formatRs(payment.amount)}? ` +
-            `That amount will be added back to the due. This can\u2019t be undone.`,
+            (payment.direction === 'in'
+            ? `That amount will go back onto what they owe you. This can\u2019t be undone.`
+            : `That amount will be added back to the due. This can\u2019t be undone.`),
           { confirmLabel: 'Delete', danger: true }
         );
         if (!confirmed) return;
@@ -832,7 +896,10 @@ function renderPaymentsUnbilledTable(
       return el('tr', {}, [
         el('td', {}, [rowCheckbox]),
         el('td', {}, [formatDateTime(payment.paid_at)]),
-        el('td', { class: 'cell-muted' }, [payment.payment_method ? PAYMENT_METHOD_LABEL[payment.payment_method] : '\u2014']),
+        el('td', { class: 'cell-muted' }, [
+          (payment.payment_method ? PAYMENT_METHOD_LABEL[payment.payment_method] : '\u2014') +
+            (payment.direction === 'in' ? ' \u00b7 received' : ''),
+        ]),
         el('td', { class: 'cell-number cell-strong' }, [formatRs(payment.amount)]),
         el('td', { class: 'cell-actions' }, [el('div', { class: 'entry-edit-actions' }, [editBtn, deleteBtn]), rowErrorSlot]),
       ]);
@@ -890,51 +957,103 @@ function generateBillPanel(
     ]);
   }
 
-  const subtotal = floorMoney(selectedEntries.reduce((sum, e) => sum + e.line_total, 0));
+  const isShopkeeper = partyType === 'shopkeeper';
+  // Same signed arithmetic as generateBill in the main process: for a
+  // shopkeeper a sale counts negative (it reduces what the shop owes them)
+  // and a payment they made to the shop counts positive.
+  const signOf = (e: Entry) => (isShopkeeper && e.entry_type === 'sale' ? -1 : 1);
+  const effectOf = (p: Payment) => (p.direction === 'in' ? p.amount : -p.amount);
+
+  const subtotal = floorMoney(selectedEntries.reduce((sum, e) => sum + signOf(e) * e.line_total, 0));
   const paymentsTotal = floorMoney(selectedPayments.reduce((sum, p) => sum + p.amount, 0));
+  const paymentsEffect = floorMoney(selectedPayments.reduce((sum, p) => sum + effectOf(p), 0));
   // Matches generateBill's exact formula: previousDue is the true balance
   // from BEFORE any currently-unbilled activity existed - currentDue,
-  // backing out ALL unbilled entries and adding back ALL unbilled
-  // payments (they already reduced currentDue when recorded, so undoing
-  // that means adding them back), regardless of what's selected here.
-  const allUnbilledEntriesTotal = floorMoney(entries.reduce((sum, e) => sum + e.line_total, 0));
-  const allUnbilledPaymentsTotal = floorMoney(payments.reduce((sum, p) => sum + p.amount, 0));
-  const previousDue = floorMoney(currentDue - allUnbilledEntriesTotal + allUnbilledPaymentsTotal);
+  // backing out ALL unbilled entries and ALL unbilled payments (they
+  // already changed currentDue when recorded), regardless of what's
+  // selected here.
+  const allUnbilledEntriesTotal = floorMoney(entries.reduce((sum, e) => sum + signOf(e) * e.line_total, 0));
+  const allUnbilledPaymentsEffect = floorMoney(payments.reduce((sum, p) => sum + effectOf(p), 0));
+  const previousDue = floorMoney(currentDue - allUnbilledEntriesTotal - allUnbilledPaymentsEffect);
   const grandTotal = floorMoney(previousDue + subtotal);
-  const remainingDue = floorMoney(grandTotal - paymentsTotal);
+  const remainingDue = floorMoney(grandTotal + paymentsEffect);
 
   const errorSlot = el('div', { class: 'form-error-slot' });
 
-  const previewRows: HTMLElement[] = [
-    el('div', { class: 'bill-preview-row' }, [
-      el('span', {}, [
-        `${selectedEntries.length} selected entr${selectedEntries.length === 1 ? 'y' : 'ies'}${
-          selectedEntries.length < entries.length ? ` (of ${entries.length} unbilled)` : ''
-        }`,
+  // Shopkeeper amounts read as "Rs. X receivable / payable" in the same
+  // green/red as the profile header.
+  const skAmount = (due: number): HTMLElement => {
+    const b = formatShopkeeperBalance(due);
+    return el('span', { class: b.kind === 'credit' ? 'cell-credit' : b.kind === 'due' ? 'cell-due' : '' }, [
+      b.kind === 'clear' ? b.text : `${b.text} ${b.kind === 'credit' ? 'receivable' : 'payable'}`,
+    ]);
+  };
+
+  let previewRows: HTMLElement[];
+  if (isShopkeeper) {
+    const selectedSales = selectedEntries.filter((e) => e.entry_type === 'sale');
+    const selectedPurchases = selectedEntries.filter((e) => e.entry_type !== 'sale');
+    const saleTotal = floorMoney(selectedSales.reduce((sum, e) => sum + e.line_total, 0));
+    const purchaseTotal = floorMoney(selectedPurchases.reduce((sum, e) => sum + e.line_total, 0));
+    previewRows = [
+      el('div', { class: 'bill-preview-row' }, [
+        el('span', {}, [`Sales (${selectedSales.length})`]),
+        el('span', {}, [formatRs(saleTotal)]),
       ]),
-      el('span', {}, [formatRs(subtotal)]),
-    ]),
-    el('div', { class: 'bill-preview-row' }, [el('span', {}, ['Previous due']), el('span', {}, [formatRs(previousDue)])]),
-    el('div', { class: 'bill-preview-row bill-preview-grand' }, [
-      el('span', {}, ['Grand total']),
-      el('span', {}, [formatRs(grandTotal)]),
-    ]),
-  ];
-  if (selectedPayments.length > 0) {
+      el('div', { class: 'bill-preview-row' }, [
+        el('span', {}, [`Purchases (${selectedPurchases.length})`]),
+        el('span', {}, [formatRs(purchaseTotal)]),
+      ]),
+      el('div', { class: 'bill-preview-row' }, [el('span', {}, ['Previous due']), skAmount(previousDue)]),
+      el('div', { class: 'bill-preview-row bill-preview-grand' }, [el('span', {}, ['Total']), skAmount(grandTotal)]),
+    ];
+    if (selectedPayments.length > 0) {
+      previewRows.push(
+        el('div', { class: 'bill-preview-row' }, [
+          el('span', {}, [
+            `${selectedPayments.length} selected payment${selectedPayments.length === 1 ? '' : 's'}${
+              selectedPayments.length < payments.length ? ` (of ${payments.length} unbilled)` : ''
+            }`,
+          ]),
+          el('span', {}, [formatRs(paymentsTotal)]),
+        ])
+      );
+    }
     previewRows.push(
+      el('div', { class: 'bill-preview-row bill-preview-grand' }, [el('span', {}, ['Remaining']), skAmount(remainingDue)])
+    );
+  } else {
+    previewRows = [
       el('div', { class: 'bill-preview-row' }, [
         el('span', {}, [
-          `${selectedPayments.length} selected payment${selectedPayments.length === 1 ? '' : 's'}${
-            selectedPayments.length < payments.length ? ` (of ${payments.length} unbilled)` : ''
+          `${selectedEntries.length} selected entr${selectedEntries.length === 1 ? 'y' : 'ies'}${
+            selectedEntries.length < entries.length ? ` (of ${entries.length} unbilled)` : ''
           }`,
         ]),
-        el('span', {}, [formatRs(paymentsTotal)]),
+        el('span', {}, [formatRs(subtotal)]),
       ]),
+      el('div', { class: 'bill-preview-row' }, [el('span', {}, ['Previous due']), el('span', {}, [formatRs(previousDue)])]),
       el('div', { class: 'bill-preview-row bill-preview-grand' }, [
-        el('span', {}, ['Remaining due']),
-        el('span', {}, [formatRs(remainingDue)]),
-      ])
-    );
+        el('span', {}, ['Grand total']),
+        el('span', {}, [formatRs(grandTotal)]),
+      ]),
+    ];
+    if (selectedPayments.length > 0) {
+      previewRows.push(
+        el('div', { class: 'bill-preview-row' }, [
+          el('span', {}, [
+            `${selectedPayments.length} selected payment${selectedPayments.length === 1 ? '' : 's'}${
+              selectedPayments.length < payments.length ? ` (of ${payments.length} unbilled)` : ''
+            }`,
+          ]),
+          el('span', {}, [formatRs(paymentsTotal)]),
+        ]),
+        el('div', { class: 'bill-preview-row bill-preview-grand' }, [
+          el('span', {}, ['Remaining due']),
+          el('span', {}, [formatRs(remainingDue)]),
+        ])
+      );
+    }
   }
 
   const form = el('form', { class: 'inline-form' }, [
@@ -995,13 +1114,18 @@ export async function renderPartyProfile(
   let unbilledPayments: Payment[];
   let payments: Payment[];
   let bills: BillListItem[];
+  let totals: ShopkeeperTotalsResponse | null;
+  const isShopkeeper = partyType === 'shopkeeper';
+  const fetchTotals = () =>
+    isShopkeeper ? window.khata.getShopkeeperTotals({ shopkeeperId: partyId }) : Promise.resolve(null);
   try {
-    [party, entries, unbilledPayments, payments, bills] = await Promise.all([
+    [party, entries, unbilledPayments, payments, bills, totals] = await Promise.all([
       window.khata.getParty({ partyType, partyId }),
       window.khata.listUnbilledEntries({ partyType, partyId }),
       window.khata.listUnbilledPayments({ partyType, partyId }),
       window.khata.listPayments({ partyType, partyId }),
       window.khata.listBillsForParty({ partyType, partyId }),
+      fetchTotals(),
     ]);
   } catch (err) {
     mount(container, backLink(partyType), errorBanner(errorMessage(err)));
@@ -1010,6 +1134,10 @@ export async function renderPartyProfile(
 
   const copy = COPY[partyType];
   const entriesWrap = el('div', {});
+  // Shopkeepers get separate Sales and Purchases tables (and forms).
+  const salesWrap = el('div', {});
+  const purchasesWrap = el('div', {});
+  const saleFormWrap = el('div', {});
   const unbilledPaymentsWrap = el('div', {});
   const paymentsWrap = el('div', {});
   const billsWrap = el('div', {});
@@ -1042,8 +1170,29 @@ export async function renderPartyProfile(
   }
 
   function refreshStatic() {
-    mount(heroWrap, dueHero(party, partyType));
-    renderEntriesTable(entriesWrap, entries, partyType, partyId, selectedEntryIds, renderBillPanel, reload);
+    mount(heroWrap, dueHero(party, partyType, totals));
+    if (isShopkeeper) {
+      renderEntriesTable(
+        salesWrap,
+        entries.filter((e) => e.entry_type === 'sale'),
+        partyType,
+        partyId,
+        selectedEntryIds,
+        renderBillPanel,
+        reload
+      );
+      renderEntriesTable(
+        purchasesWrap,
+        entries.filter((e) => e.entry_type !== 'sale'),
+        partyType,
+        partyId,
+        selectedEntryIds,
+        renderBillPanel,
+        reload
+      );
+    } else {
+      renderEntriesTable(entriesWrap, entries, partyType, partyId, selectedEntryIds, renderBillPanel, reload);
+    }
     renderPaymentsUnbilledTable(
       unbilledPaymentsWrap,
       unbilledPayments,
@@ -1059,13 +1208,23 @@ export async function renderPartyProfile(
     mount(deleteWrap, deletePartyControls(party, partyType));
   }
 
+  function buildEntryForms() {
+    if (isShopkeeper) {
+      saleFormWrap.replaceChildren(addEntryForm(partyType, partyId, reload, 'sale', 'Add Sale'));
+      entryFormWrap.replaceChildren(addEntryForm(partyType, partyId, reload, 'purchase', 'Add Purchase'));
+    } else {
+      entryFormWrap.replaceChildren(addEntryForm(partyType, partyId, reload));
+    }
+  }
+
   async function reload() {
-    [party, entries, unbilledPayments, payments, bills] = await Promise.all([
+    [party, entries, unbilledPayments, payments, bills, totals] = await Promise.all([
       window.khata.getParty({ partyType, partyId }),
       window.khata.listUnbilledEntries({ partyType, partyId }),
       window.khata.listUnbilledPayments({ partyType, partyId }),
       window.khata.listPayments({ partyType, partyId }),
       window.khata.listBillsForParty({ partyType, partyId }),
+      fetchTotals(),
     ]);
     selectedEntryIds = new Set(entries.map((e) => e.id));
     selectedPaymentIds = new Set(unbilledPayments.map((p) => p.id));
@@ -1073,11 +1232,11 @@ export async function renderPartyProfile(
     // Forms read party.current_due / entries at build time, so they're
     // rebuilt fresh on every reload rather than mutated in place.
     paymentFormWrap.replaceChildren(paymentForm(partyType, partyId, party.current_due, reload));
-    entryFormWrap.replaceChildren(addEntryForm(partyType, partyId, reload));
+    buildEntryForms();
   }
 
   paymentFormWrap.replaceChildren(paymentForm(partyType, partyId, party.current_due, reload));
-  entryFormWrap.replaceChildren(addEntryForm(partyType, partyId, reload));
+  buildEntryForms();
 
   refreshStatic();
 
@@ -1085,11 +1244,20 @@ export async function renderPartyProfile(
     container,
     el('div', { class: 'profile-header-row' }, [backLink(partyType), deleteWrap]),
     heroWrap,
-    el('div', { class: 'profile-columns' }, [
-      el('section', { class: 'panel' }, [el('h2', {}, [copy.entryVerb]), entryFormWrap]),
-      el('section', { class: 'panel' }, [el('h2', {}, ['Make a Payment']), paymentFormWrap]),
-    ]),
-    el('section', { class: 'panel' }, [el('h2', {}, [copy.addEntryLabel]), entriesWrap]),
+    isShopkeeper
+      ? el('div', { class: 'profile-columns' }, [
+          el('section', { class: 'panel' }, [el('h2', {}, ['Add Sale']), saleFormWrap]),
+          el('section', { class: 'panel' }, [el('h2', {}, ['Add Purchase']), entryFormWrap]),
+        ])
+      : el('div', { class: 'profile-columns' }, [
+          el('section', { class: 'panel' }, [el('h2', {}, [copy.entryVerb]), entryFormWrap]),
+          el('section', { class: 'panel' }, [el('h2', {}, ['Make a Payment']), paymentFormWrap]),
+        ]),
+    isShopkeeper ? el('section', { class: 'panel' }, [el('h2', {}, ['Make a Payment']), paymentFormWrap]) : null,
+    isShopkeeper
+      ? el('section', { class: 'panel' }, [el('h2', {}, ['Sales (unbilled)']), salesWrap])
+      : el('section', { class: 'panel' }, [el('h2', {}, [copy.addEntryLabel]), entriesWrap]),
+    isShopkeeper ? el('section', { class: 'panel' }, [el('h2', {}, ['Purchases (unbilled)']), purchasesWrap]) : null,
     // Suppliers only: how many KG were bought in a chosen date range.
     partyType === 'supplier' ? weightRangePanel(partyType, partyId) : null,
     el('section', { class: 'panel' }, [el('h2', {}, ['Payments (unbilled)']), unbilledPaymentsWrap]),

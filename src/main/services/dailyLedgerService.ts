@@ -42,18 +42,21 @@ export function createDailyLedger(db: Database.Database, ledgerDate: string): Da
  * against the due is NOT included here at all - payments live only in
  * the `payments` table and never touch entry_date-based queries.
  */
+// NOTE: the UNION queries below list entry columns explicitly instead of
+// `SELECT x.*` - shopkeeper_entries has an extra entry_type column the other
+// entry tables don't, so `*` would make the two halves of a UNION mismatch.
 function getSupplierPurchasesForDate(db: Database.Database, date: string): EntryWithPartyName[] {
   return db
     .prepare(
-      `SELECT se.*, 'supplier' AS party_type, se.supplier_id AS party_id, s.name AS party_name
+      `SELECT se.id, se.entry_date, se.item_name, se.weight_kg, se.rate_per_kg, se.line_total, se.bill_id, 'supplier' AS party_type, se.supplier_id AS party_id, s.name AS party_name
        FROM supplier_entries se
        JOIN suppliers s ON s.id = se.supplier_id
        WHERE date(se.entry_date) = ?
        UNION ALL
-       SELECT ke.*, 'shopkeeper' AS party_type, ke.shopkeeper_id AS party_id, k.name AS party_name
+       SELECT ke.id, ke.entry_date, ke.item_name, ke.weight_kg, ke.rate_per_kg, ke.line_total, ke.bill_id, 'shopkeeper' AS party_type, ke.shopkeeper_id AS party_id, k.name AS party_name
        FROM shopkeeper_entries ke
        JOIN shopkeepers k ON k.id = ke.shopkeeper_id
-       WHERE date(ke.entry_date) = ?
+       WHERE date(ke.entry_date) = ? AND ke.entry_type = 'purchase'
        ORDER BY entry_date`
     )
     .all(date, date) as EntryWithPartyName[];
@@ -61,6 +64,9 @@ function getSupplierPurchasesForDate(db: Database.Database, date: string): Entry
 
 /**
  * Khata customer sales for one date, with the customer's name attached.
+ * Sales made to SHOPKEEPERS are included too: they're real sales (money the
+ * shop earns), so leaving them out would understate income, and counting
+ * them with the purchases would wrongly show them as an expense.
  * Rule 3/4: a sale is the income; a payment collecting an existing due is
  * NOT included here - same separation as suppliers above. Cash-customer
  * sales are never in this table at all (spec section 2), so this query
@@ -69,13 +75,18 @@ function getSupplierPurchasesForDate(db: Database.Database, date: string): Entry
 function getKhataSalesForDate(db: Database.Database, date: string): EntryWithPartyName[] {
   return db
     .prepare(
-      `SELECT ce.*, 'customer' AS party_type, ce.customer_id AS party_id, c.name AS party_name
+      `SELECT ce.id, ce.entry_date, ce.item_name, ce.weight_kg, ce.rate_per_kg, ce.line_total, ce.bill_id, 'customer' AS party_type, ce.customer_id AS party_id, c.name AS party_name
        FROM customer_entries ce
        JOIN customers c ON c.id = ce.customer_id
        WHERE date(ce.entry_date) = ?
-       ORDER BY ce.entry_date`
+       UNION ALL
+       SELECT ke.id, ke.entry_date, ke.item_name, ke.weight_kg, ke.rate_per_kg, ke.line_total, ke.bill_id, 'shopkeeper' AS party_type, ke.shopkeeper_id AS party_id, k.name AS party_name
+       FROM shopkeeper_entries ke
+       JOIN shopkeepers k ON k.id = ke.shopkeeper_id
+       WHERE date(ke.entry_date) = ? AND ke.entry_type = 'sale'
+       ORDER BY entry_date`
     )
-    .all(date) as EntryWithPartyName[];
+    .all(date, date) as EntryWithPartyName[];
 }
 
 /**
@@ -385,7 +396,7 @@ export function listDailyLedgers(
           .prepare(
             `SELECT
                COALESCE((SELECT SUM(line_total) FROM supplier_entries WHERE date(entry_date) = ?), 0) +
-               COALESCE((SELECT SUM(line_total) FROM shopkeeper_entries WHERE date(entry_date) = ?), 0)
+               COALESCE((SELECT SUM(line_total) FROM shopkeeper_entries WHERE date(entry_date) = ? AND entry_type = 'purchase'), 0)
              AS total`
           )
           .get(ledger.ledger_date, ledger.ledger_date) as { total: number }
@@ -394,8 +405,13 @@ export function listDailyLedgers(
     const khataTotal = floorMoney(
       (
         db
-          .prepare(`SELECT COALESCE(SUM(line_total), 0) AS total FROM customer_entries WHERE date(entry_date) = ?`)
-          .get(ledger.ledger_date) as { total: number }
+          .prepare(
+            `SELECT
+               COALESCE((SELECT SUM(line_total) FROM customer_entries WHERE date(entry_date) = ?), 0) +
+               COALESCE((SELECT SUM(line_total) FROM shopkeeper_entries WHERE date(entry_date) = ? AND entry_type = 'sale'), 0)
+             AS total`
+          )
+          .get(ledger.ledger_date, ledger.ledger_date) as { total: number }
       ).total
     );
     const udharTotal = floorMoney(

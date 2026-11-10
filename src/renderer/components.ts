@@ -1,4 +1,5 @@
 import { el } from './dom';
+import { ITEM_OPTIONS } from '../shared/items';
 
 // Errors thrown from the main process arrive as plain Error objects over
 // IPC; this just guards against anything else showing up as "[object Object]".
@@ -105,4 +106,24 @@ export function confirmDialog(
     document.body.append(overlay);
     confirmBtn.focus();
   });
+}
+
+/**
+ * The item dropdown used by every form that picks an item (party purchase /
+ * sale forms, entry editing, Counter Sale). The list lives in
+ * shared/items.ts. When editing an old entry whose saved item isn't in the
+ * list (it was typed freehand before the dropdown existed), that value is
+ * kept as an extra option so opening and saving the entry doesn't silently
+ * rename it.
+ */
+export function itemSelect(selected?: string): HTMLSelectElement {
+  const options: string[] = [...ITEM_OPTIONS];
+  if (selected && !options.includes(selected)) options.push(selected);
+  const select = el(
+    'select',
+    { class: 'item-select', 'aria-label': 'Item' },
+    options.map((name) => el('option', { value: name }, [name]))
+  ) as HTMLSelectElement;
+  select.value = selected && options.includes(selected) ? selected : options[0];
+  return select;
 }
