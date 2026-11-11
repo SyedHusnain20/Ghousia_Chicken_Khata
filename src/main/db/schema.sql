@@ -225,7 +225,8 @@ CREATE TABLE IF NOT EXISTS counter_sale_bills (
   bill_date       TEXT NOT NULL,            -- 'YYYY-MM-DD HH:MM:SS' (date part = the sale date)
   customer_name   TEXT,
   customer_number TEXT,
-  total           REAL NOT NULL
+  total           REAL NOT NULL,
+  paid_amount     REAL                      -- NULL (older rows) is read as fully paid
 );
 
 CREATE TABLE IF NOT EXISTS counter_sale_entries (

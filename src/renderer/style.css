@@ -1227,3 +1227,20 @@ input:focus, select:focus, button:focus-visible, a:focus-visible, .clickable-row
   font-weight: 700;
   font-size: 16px;
 }
+
+/* Counter Sale bills that still have an amount to collect: red, until marked paid. */
+.counter-bill-unpaid {
+  border-color: var(--color-due);
+  background: var(--color-due-tint);
+}
+.counter-bill-unpaid .counter-bill-name { color: var(--color-due); }
+.counter-bill-owed {
+  color: var(--color-due);
+  font-weight: 700;
+  margin-top: 2px;
+}
+.counter-bill-buttons {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}

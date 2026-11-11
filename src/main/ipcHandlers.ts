@@ -35,6 +35,8 @@ import type {
   GenerateCounterSaleBillRequest,
   ListCounterSaleBillsRequest,
   GetCounterSaleBillRequest,
+  MarkCounterSaleBillPaidRequest,
+  RestoreCounterSaleBillRequest,
 } from '../shared/ipc';
 import {
   createParty,
@@ -67,6 +69,8 @@ import {
   generateCounterSaleBill,
   listCounterSaleBillsForDate,
   getCounterSaleBill,
+  markCounterSaleBillPaid,
+  restoreCounterSaleBill,
 } from './services/counterSaleService';
 import {
   createDailyLedger,
@@ -125,7 +129,7 @@ export function registerIpcHandlers(db: Database.Database): void {
   });
 
   guardedHandle(IpcChannels.COUNTER_SALE_GENERATE_BILL, (_event, req: GenerateCounterSaleBillRequest) => {
-    return generateCounterSaleBill(db, req.entryIds);
+    return generateCounterSaleBill(db, req.entryIds, req.paidAmount);
   });
 
   guardedHandle(IpcChannels.COUNTER_SALE_LIST_BILLS, (_event, req: ListCounterSaleBillsRequest) => {
@@ -134,6 +138,14 @@ export function registerIpcHandlers(db: Database.Database): void {
 
   guardedHandle(IpcChannels.COUNTER_SALE_GET_BILL, (_event, req: GetCounterSaleBillRequest) => {
     return getCounterSaleBill(db, req.billId);
+  });
+
+  guardedHandle(IpcChannels.COUNTER_SALE_MARK_PAID, (_event, req: MarkCounterSaleBillPaidRequest) => {
+    return markCounterSaleBillPaid(db, req.billId);
+  });
+
+  guardedHandle(IpcChannels.COUNTER_SALE_RESTORE_BILL, (_event, req: RestoreCounterSaleBillRequest) => {
+    return restoreCounterSaleBill(db, req.billId);
   });
 
   guardedHandle(IpcChannels.PARTY_DELETE, (_event, req: DeletePartyRequest) => {

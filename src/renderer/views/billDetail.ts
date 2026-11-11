@@ -6,6 +6,7 @@ import { partyProfilePath } from '../partyPaths';
 import { SHOP_NAME_EN, SHOP_NAME_UR } from '../shopConfig';
 import type { BillDetail, Entry, PartyType } from '../../main/types';
 import { summarizeShopkeeperBill, shopkeeperBalance } from '../../shared/shopkeeperBill';
+import { OWNER_NAME } from '../../shared/shopIdentity';
 
 const TITLE: Record<PartyType, string> = {
   supplier: 'Supplier Bill',
@@ -167,7 +168,9 @@ function shopkeeperBody(bill: BillDetail): HTMLElement[] {
   const { sales, purchases, totalSale, totalPurchase } = summarizeShopkeeperBill(bill);
 
   const paymentRows = bill.payments.map((p) => {
-    const who = p.direction === 'in' ? 'They paid' : 'You paid';
+    // Named so there's no confusion over who paid: the shop owner when the
+    // shop paid the shopkeeper, the shopkeeper's profile name when they paid.
+    const who = `${p.direction === 'in' ? bill.party_name : OWNER_NAME} paid`;
     const how = p.payment_method ? PAYMENT_METHOD_LABEL[p.payment_method] : '\u2014';
     return el('div', { class: 'receipt-total-row' }, [
       el('span', {}, [`${who} (${how}, ${formatDateShort(p.paid_at)})`]),

@@ -93,6 +93,14 @@ function runMigrations(db: Database.Database): void {
     db.exec("ALTER TABLE payments ADD COLUMN direction TEXT NOT NULL DEFAULT 'out'");
   }
 
+  // Counter Sale bills gained a paid amount (partial payment support). Older
+  // rows were always fully paid, so backfill them to their total.
+  const counterBillColumns = db.prepare('PRAGMA table_info(counter_sale_bills)').all() as { name: string }[];
+  if (!counterBillColumns.some((c) => c.name === 'paid_amount')) {
+    db.exec('ALTER TABLE counter_sale_bills ADD COLUMN paid_amount REAL');
+    db.exec('UPDATE counter_sale_bills SET paid_amount = total WHERE paid_amount IS NULL');
+  }
+
   // daily_ledgers: old databases have "cash_customer_income" (REAL) and no
   // Items Left columns at all. A rebuild is required here (not just
   // RENAME/ADD COLUMN) because the money columns also need to go from REAL

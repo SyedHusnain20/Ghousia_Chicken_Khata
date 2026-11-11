@@ -3,7 +3,9 @@ import fs from 'fs';
 import path from 'path';
 import Database from 'better-sqlite3';
 import { getBillById } from '../services/partyService';
-import type { BillDetail, Entry, PartyType } from '../types';
+import { getCounterSaleBill } from '../services/counterSaleService';
+import type { BillDetail, CounterSaleBill, Entry, PartyType } from '../types';
+import { OWNER_NAME } from '../../shared/shopIdentity';
 import { summarizeShopkeeperBill, shopkeeperBalance } from '../../shared/shopkeeperBill';
 
 // Mirrors src/renderer/shopConfig.ts - kept as local constants rather than
@@ -102,7 +104,8 @@ function buildShopkeeperBodyHtml(bill: BillDetail): string {
   const remaining = balanceText(bill.remaining_due);
   const paymentRows = bill.payments
     .map((p) => {
-      const who = p.direction === 'in' ? 'They paid' : 'You paid';
+      // Named, not "You/They": "<shop owner> paid" when the shop paid, "<shopkeeper> paid" when they did.
+      const who = escapeHtml(`${p.direction === 'in' ? bill.party_name : OWNER_NAME} paid`);
       const how = p.payment_method ? PAYMENT_METHOD_LABEL[p.payment_method] : '\u2014';
       return `<div class="total-row"><span>${who} (${how}, ${formatDateShort(p.paid_at)})</span><span>${formatRs(p.amount)}</span></div>`;
     })
@@ -119,67 +122,7 @@ function buildShopkeeperBodyHtml(bill: BillDetail): string {
   </div>`;
 }
 
-// Deliberately mirrors src/renderer/style.css's .receipt* rules and color
-// tokens as closely as possible, so the shared image looks like the same
-// bill the shopkeeper sees and prints in-app - just rendered standalone,
-// since main can't reuse renderer CSS/DOM code directly (see
-// tsconfig.json's renderer exclusion).
-function buildBillHtml(bill: BillDetail): string {
-  const paidTotal = Math.floor(bill.payments.reduce((sum, p) => sum + p.amount, 0));
-
-  const itemRows = bill.items
-    .map(
-      (item) => `
-      <tr>
-        <td>${formatDateShort(item.entry_date)}</td>
-        <td>${escapeHtml(item.item_name)}</td>
-        <td class="num">${item.weight_kg}</td>
-        <td class="num">${formatRs(item.rate_per_kg)}</td>
-        <td class="num">${formatRs(item.line_total)}</td>
-      </tr>`
-    )
-    .join('');
-
-  const paymentRows = bill.payments
-    .map(
-      (payment) => `
-      <tr>
-        <td>${formatDateShort(payment.paid_at)}</td>
-        <td>${payment.payment_method ? PAYMENT_METHOD_LABEL[payment.payment_method] : '\u2014'}</td>
-        <td class="num">${formatRs(payment.amount)}</td>
-      </tr>`
-    )
-    .join('');
-
-  const standardBodyHtml = `
-  <table>
-    <thead>
-      <tr><th>Date</th><th>Item</th><th class="num">KG</th><th class="num">Rate</th><th class="num">Total</th></tr>
-    </thead>
-    <tbody>${itemRows}</tbody>
-  </table>
-  <div class="totals">
-    <div class="total-row"><span>This bill's purchases</span><span>${formatRs(bill.subtotal)}</span></div>
-    <div class="total-row"><span>Previous due</span><span>${formatRs(bill.previous_due)}</span></div>
-    <div class="total-row total-grand"><span>Grand total</span><span>${formatRs(bill.total_due_after_bill)}</span></div>
-    <div class="total-row"><span>Total paid</span><span>${paidTotal > 0 ? formatRs(paidTotal) : '\u2014 (not paid yet)'}</span></div>
-    <div class="total-row total-remaining"><span>Remaining due</span><span>${formatRs(bill.remaining_due)}</span></div>
-  </div>
-  ${
-    bill.payments.length > 0
-      ? `<div class="payments-section">
-    <div class="payments-section-label">Payments</div>
-    <table>
-    <thead>
-      <tr><th>Date</th><th>Method</th><th class="num">Paid</th></tr>
-    </thead>
-    <tbody>${paymentRows}</tbody>
-  </table>
-  </div>`
-      : ''
-  }
-`;
-
+function renderBillPage(title: string, metaHtml: string, bodyHtml: string): string {
   return `<!DOCTYPE html>
 <html>
 <head>
@@ -317,15 +260,11 @@ function buildBillHtml(bill: BillDetail): string {
   <div class="header">
     <div class="shop-ur">${SHOP_NAME_UR}</div>
     <div class="shop-en">${escapeHtml(SHOP_NAME_EN)}</div>
-    <div class="title">${TITLE[bill.party_type]}</div>
+    <div class="title">${escapeHtml(title)}</div>
   </div>
-  <div class="meta">
-    <div class="meta-row"><span>Bill #</span><span>${bill.id}</span></div>
-    <div class="meta-row"><span>Date</span><span>${formatDateTime(bill.bill_date)}</span></div>
-    <div class="meta-row"><span>${PARTY_LABEL[bill.party_type]}</span><span>${escapeHtml(bill.party_name)}</span></div>
-    ${bill.party_contact ? `<div class="meta-row"><span>Contact</span><span>${escapeHtml(bill.party_contact)}</span></div>` : ''}
+  <div class="meta">${metaHtml}
   </div>
-  ${bill.party_type === 'shopkeeper' ? buildShopkeeperBodyHtml(bill) : standardBodyHtml}
+  ${bodyHtml}
   <div class="footer">
     <div>Powered by R&amp;R Digital Solutions</div>
     <div>Contact: 03126641281</div>
@@ -333,9 +272,120 @@ function buildBillHtml(bill: BillDetail): string {
   </div>
 </body>
 </html>`;
+
+}
+
+// Deliberately mirrors src/renderer/style.css's .receipt* rules and color
+// tokens as closely as possible, so the shared image looks like the same
+// bill the shopkeeper sees and prints in-app - just rendered standalone,
+// since main can't reuse renderer CSS/DOM code directly (see
+// tsconfig.json's renderer exclusion).
+export function buildBillHtml(bill: BillDetail): string {
+  const paidTotal = Math.floor(bill.payments.reduce((sum, p) => sum + p.amount, 0));
+
+  const itemRows = bill.items
+    .map(
+      (item) => `
+      <tr>
+        <td>${formatDateShort(item.entry_date)}</td>
+        <td>${escapeHtml(item.item_name)}</td>
+        <td class="num">${item.weight_kg}</td>
+        <td class="num">${formatRs(item.rate_per_kg)}</td>
+        <td class="num">${formatRs(item.line_total)}</td>
+      </tr>`
+    )
+    .join('');
+
+  const paymentRows = bill.payments
+    .map(
+      (payment) => `
+      <tr>
+        <td>${formatDateShort(payment.paid_at)}</td>
+        <td>${payment.payment_method ? PAYMENT_METHOD_LABEL[payment.payment_method] : '\u2014'}</td>
+        <td class="num">${formatRs(payment.amount)}</td>
+      </tr>`
+    )
+    .join('');
+
+  const standardBodyHtml = `
+  <table>
+    <thead>
+      <tr><th>Date</th><th>Item</th><th class="num">KG</th><th class="num">Rate</th><th class="num">Total</th></tr>
+    </thead>
+    <tbody>${itemRows}</tbody>
+  </table>
+  <div class="totals">
+    <div class="total-row"><span>This bill's purchases</span><span>${formatRs(bill.subtotal)}</span></div>
+    <div class="total-row"><span>Previous due</span><span>${formatRs(bill.previous_due)}</span></div>
+    <div class="total-row total-grand"><span>Grand total</span><span>${formatRs(bill.total_due_after_bill)}</span></div>
+    <div class="total-row"><span>Total paid</span><span>${paidTotal > 0 ? formatRs(paidTotal) : '\u2014 (not paid yet)'}</span></div>
+    <div class="total-row total-remaining"><span>Remaining due</span><span>${formatRs(bill.remaining_due)}</span></div>
+  </div>
+  ${
+    bill.payments.length > 0
+      ? `<div class="payments-section">
+    <div class="payments-section-label">Payments</div>
+    <table>
+    <thead>
+      <tr><th>Date</th><th>Method</th><th class="num">Paid</th></tr>
+    </thead>
+    <tbody>${paymentRows}</tbody>
+  </table>
+  </div>`
+      : ''
+  }
+`;
+
+  const metaHtml = `
+    <div class="meta-row"><span>Bill #</span><span>${bill.id}</span></div>
+    <div class="meta-row"><span>Date</span><span>${formatDateTime(bill.bill_date)}</span></div>
+    <div class="meta-row"><span>${PARTY_LABEL[bill.party_type]}</span><span>${escapeHtml(bill.party_name)}</span></div>
+    ${bill.party_contact ? `<div class="meta-row"><span>Contact</span><span>${escapeHtml(bill.party_contact)}</span></div>` : ''}`;
+  return renderBillPage(
+    TITLE[bill.party_type],
+    metaHtml,
+    bill.party_type === 'shopkeeper' ? buildShopkeeperBodyHtml(bill) : standardBodyHtml
+  );
 }
 
 const IMAGE_WIDTH = 430;
+
+// Counter Sale bill: same look as a customer bill, without previous due /
+// payment history. If the customer hasn't paid in full the paid and
+// remaining amounts are shown (remaining in red).
+export function buildCounterSaleBillHtml(bill: CounterSaleBill): string {
+  const rows = bill.items
+    .map(
+      (item) => `
+      <tr>
+        <td>${formatDateShort(item.entry_date)}</td>
+        <td>${escapeHtml(item.item_name)}</td>
+        <td class="num">${item.weight_kg}</td>
+        <td class="num">${formatRs(item.rate_per_kg)}</td>
+        <td class="num">${formatRs(item.line_total)}</td>
+      </tr>`
+    )
+    .join('');
+  const metaHtml = `
+    <div class="meta-row"><span>Bill #</span><span>${bill.id}</span></div>
+    <div class="meta-row"><span>Date</span><span>${formatDateTime(bill.bill_date)}</span></div>
+    <div class="meta-row"><span>Customer</span><span>${escapeHtml(bill.customer_label)}</span></div>
+    ${bill.customer_number ? `<div class="meta-row"><span>Contact</span><span>${escapeHtml(bill.customer_number)}</span></div>` : ''}`;
+  const unpaid = bill.remaining_due > 0;
+  const body = `
+  <table>
+    <thead>
+      <tr><th>Date</th><th>Item</th><th class="num">KG</th><th class="num">Rate</th><th class="num">Total</th></tr>
+    </thead>
+    <tbody>${rows}</tbody>
+  </table>
+  <div class="totals">
+    <div class="total-row total-grand"><span>Total</span><span>${formatRs(bill.total)}</span></div>
+    ${unpaid ? `<div class="total-row"><span>Paid</span><span>${formatRs(bill.paid_amount)}</span></div>
+    <div class="total-row total-grand bal-payable"><span>Remaining</span><span>${formatRs(bill.remaining_due)}</span></div>` : ''}
+  </div>`;
+  return renderBillPage('Customer Bill', metaHtml, body);
+}
 
 async function renderHtmlToImage(html: string): Promise<Electron.NativeImage> {
   const hiddenWindow = new BrowserWindow({
@@ -383,28 +433,51 @@ export interface ShareBillImageResult {
  * copy-then-paste is the smoothest real alternative on both WhatsApp
  * Desktop and Web.
  */
-export async function shareBillAsImage(
-  db: Database.Database,
-  partyType: PartyType,
-  billId: number
+// Renders the page to an image, copies it to the clipboard, saves a copy as a
+// fallback, and returns the wa.me link when there's a usable phone number.
+async function deliverBillImage(
+  html: string,
+  fileLabel: string,
+  billId: number,
+  contact: string | null
 ): Promise<ShareBillImageResult> {
-  const bill = getBillById(db, partyType, billId);
-  const html = buildBillHtml(bill);
   const image = await renderHtmlToImage(html);
 
   clipboard.writeImage(image);
 
   const folder = path.join(app.getPath('documents'), 'Ghousia Chicken Khata Bills');
   fs.mkdirSync(folder, { recursive: true });
-  const safeName = bill.party_name.replace(/[^\w\- ]/g, '').trim() || 'bill';
-  const savedPath = path.join(folder, `${safeName} - Bill ${bill.id}.png`);
+  const safeName = fileLabel.replace(/[^\w\- ]/g, '').trim() || 'bill';
+  const savedPath = path.join(folder, `${safeName} - Bill ${billId}.png`);
   fs.writeFileSync(savedPath, image.toPNG());
 
-  const whatsappNumber = bill.party_contact ? toWhatsAppNumber(bill.party_contact) : null;
+  const whatsappNumber = contact ? toWhatsAppNumber(contact) : null;
   const whatsappUrl = whatsappNumber ? `https://wa.me/${whatsappNumber}` : null;
   if (whatsappUrl) {
     shell.openExternal(whatsappUrl);
   }
 
   return { savedPath, whatsappUrl };
+}
+
+export async function shareBillAsImage(
+  db: Database.Database,
+  partyType: PartyType,
+  billId: number
+): Promise<ShareBillImageResult> {
+  const bill = getBillById(db, partyType, billId);
+  return deliverBillImage(buildBillHtml(bill), bill.party_name, bill.id, bill.party_contact);
+}
+
+export async function shareCounterSaleBillAsImage(
+  db: Database.Database,
+  billId: number
+): Promise<ShareBillImageResult> {
+  const bill = getCounterSaleBill(db, billId);
+  return deliverBillImage(
+    buildCounterSaleBillHtml(bill),
+    `Counter Sale ${bill.customer_label}`,
+    bill.id,
+    bill.customer_number
+  );
 }

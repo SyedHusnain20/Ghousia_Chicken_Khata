@@ -59,6 +59,8 @@ export const IpcChannels = {
   COUNTER_SALE_GENERATE_BILL: 'counter-sale:generate-bill',
   COUNTER_SALE_LIST_BILLS: 'counter-sale:list-bills',
   COUNTER_SALE_GET_BILL: 'counter-sale:get-bill',
+  COUNTER_SALE_MARK_PAID: 'counter-sale:mark-paid',
+  COUNTER_SALE_RESTORE_BILL: 'counter-sale:restore-bill',
   STORAGE_GET_INFO: 'storage:get-info',
   STORAGE_CHOOSE_FOLDER: 'storage:choose-folder',
   STORAGE_CONFIRM_CHANGE: 'storage:confirm-change',
@@ -68,6 +70,7 @@ export const IpcChannels = {
   STORAGE_CONFIRM_RESTORE: 'storage:confirm-restore',
   REPORT_CUSTOMERS_CLOSING_PDF: 'report:customers-closing-pdf',
   REPORT_SHARE_BILL_IMAGE: 'report:share-bill-image',
+  REPORT_SHARE_COUNTER_SALE_IMAGE: 'report:share-counter-sale-image',
   AUTH_GET_STATUS: 'auth:get-status',
   AUTH_SETUP: 'auth:setup',
   AUTH_UNLOCK: 'auth:unlock',
@@ -334,6 +337,23 @@ export interface DeleteCounterSaleEntryRequest {
 
 export interface GenerateCounterSaleBillRequest {
   entryIds?: number[]; // omit to bill every pending entry
+  paidAmount?: number; // omit for full payment; less than the total leaves a balance to collect
+}
+
+export interface MarkCounterSaleBillPaidRequest {
+  billId: number;
+}
+
+export interface RestoreCounterSaleBillRequest {
+  billId: number;
+}
+
+export interface RestoreCounterSaleBillResponse {
+  entriesRestored: number;
+}
+
+export interface ShareCounterSaleBillImageRequest {
+  billId: number;
 }
 
 export interface ListCounterSaleBillsRequest {
@@ -431,6 +451,9 @@ export interface KhataApi {
   generateCounterSaleBill(req: GenerateCounterSaleBillRequest): Promise<CounterSaleBill>;
   listCounterSaleBills(req: ListCounterSaleBillsRequest): Promise<CounterSaleBill[]>;
   getCounterSaleBill(req: GetCounterSaleBillRequest): Promise<CounterSaleBill>;
+  markCounterSaleBillPaid(req: MarkCounterSaleBillPaidRequest): Promise<CounterSaleBill>;
+  restoreCounterSaleBill(req: RestoreCounterSaleBillRequest): Promise<RestoreCounterSaleBillResponse>;
+  shareCounterSaleBillImage(req: ShareCounterSaleBillImageRequest): Promise<ShareBillImageResponse>;
   getStorageInfo(): Promise<StorageInfo>;
   // Opens a native folder-picker dialog. Resolves to null if cancelled.
   chooseStorageFolder(): Promise<ChooseFolderResult | null>;

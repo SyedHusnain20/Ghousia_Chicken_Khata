@@ -81,7 +81,11 @@ export function deleteCounterSaleEntry(db: Database.Database, entryId: number): 
  * earliest entry's date - that's what files it under the right day on the
  * Counter Sale page - with the real current time of day.
  */
-export function generateCounterSaleBill(db: Database.Database, entryIds?: number[]): CounterSaleBill {
+export function generateCounterSaleBill(
+  db: Database.Database,
+  entryIds?: number[],
+  paidAmount?: number // omit for full payment
+): CounterSaleBill {
   const run = db.transaction(() => {
     const pending = listPendingCounterSaleEntries(db);
     let chosen: CounterSaleEntry[];
@@ -97,14 +101,19 @@ export function generateCounterSaleBill(db: Database.Database, entryIds?: number
     if (chosen.length === 0) throw new Error('Add at least one item before generating a bill');
 
     const total = floorMoney(chosen.reduce((sum, e) => sum + e.line_total, 0));
+    const paid = paidAmount === undefined ? total : floorMoney(paidAmount);
+    if (!Number.isFinite(paid) || paid < 0) throw new Error('Payment cannot be negative');
+    if (paid > total) throw new Error(`Payment cannot be more than the bill total (${total})`);
     const earliestDate = chosen.map((e) => e.entry_date.split(' ')[0]).sort()[0];
     const billDate = `${earliestDate} ${pakistanNow().time}`;
     const customerName = chosen.find((e) => e.customer_name)?.customer_name ?? null;
     const customerNumber = chosen.find((e) => e.customer_number)?.customer_number ?? null;
 
     const billId = db
-      .prepare('INSERT INTO counter_sale_bills (bill_date, customer_name, customer_number, total) VALUES (?, ?, ?, ?)')
-      .run(billDate, customerName, customerNumber, total).lastInsertRowid as number;
+      .prepare(
+        'INSERT INTO counter_sale_bills (bill_date, customer_name, customer_number, total, paid_amount) VALUES (?, ?, ?, ?, ?)'
+      )
+      .run(billDate, customerName, customerNumber, total, paid).lastInsertRowid as number;
 
     const lock = db.prepare('UPDATE counter_sale_entries SET bill_id = ? WHERE id = ?');
     for (const e of chosen) lock.run(billId, e.id);
@@ -120,9 +129,11 @@ interface BillRow {
   customer_name: string | null;
   customer_number: string | null;
   total: number;
+  paid_amount: number | null;
 }
 
 function toBill(db: Database.Database, row: BillRow, label: string): CounterSaleBill {
+  const paid = row.paid_amount ?? row.total; // older rows: fully paid
   const items = db
     .prepare('SELECT * FROM counter_sale_entries WHERE bill_id = ? ORDER BY entry_date, id')
     .all(row.id) as CounterSaleEntry[];
@@ -133,6 +144,8 @@ function toBill(db: Database.Database, row: BillRow, label: string): CounterSale
     customer_number: row.customer_number,
     customer_label: label,
     total: row.total,
+    paid_amount: paid,
+    remaining_due: floorMoney(row.total - paid),
     items,
   };
 }
@@ -168,4 +181,31 @@ export function getCounterSaleBill(db: Database.Database, billId: number): Count
     .all(row.bill_date) as { id: number }[];
   const position = sameDay.findIndex((b) => b.id === row.id) + 1;
   return toBill(db, row, `Customer ${position}`);
+}
+
+/**
+ * The customer has now paid the rest: the bill becomes an ordinary fully
+ * paid sale (no more red highlight, no outstanding amount).
+ */
+export function markCounterSaleBillPaid(db: Database.Database, billId: number): CounterSaleBill {
+  const row = db.prepare('SELECT id FROM counter_sale_bills WHERE id = ?').get(billId);
+  if (!row) throw new Error(`Counter sale bill ${billId} not found`);
+  db.prepare('UPDATE counter_sale_bills SET paid_amount = total WHERE id = ?').run(billId);
+  return getCounterSaleBill(db, billId);
+}
+
+/**
+ * Undo a generated bill: its items go back to the pending list (with their
+ * original dates and amounts) and the bill is deleted - the counter-sale
+ * version of "Restore bill" on every other bill. Nothing else in the app
+ * is affected because nothing else ever read this bill.
+ */
+export function restoreCounterSaleBill(db: Database.Database, billId: number): { entriesRestored: number } {
+  return db.transaction(() => {
+    const row = db.prepare('SELECT id FROM counter_sale_bills WHERE id = ?').get(billId);
+    if (!row) throw new Error(`Counter sale bill ${billId} not found`);
+    const result = db.prepare('UPDATE counter_sale_entries SET bill_id = NULL WHERE bill_id = ?').run(billId);
+    db.prepare('DELETE FROM counter_sale_bills WHERE id = ?').run(billId);
+    return { entriesRestored: Number(result.changes) };
+  })();
 }

@@ -395,7 +395,23 @@ function addEntryForm(
   return form;
 }
 
-function paymentForm(partyType: PartyType, partyId: number, currentDue: number, onSaved: () => void): HTMLElement {
+// For a shopkeeper this form is one of TWO: "Payment Made by Us" (direction
+// 'out' - raises what they owe you) and "Payment Made by <shopkeeper>"
+// (direction 'in' - raises what you owe them). The direction is fixed per
+// form, so there's nothing to pick and nothing to get backwards. Everyone
+// else has the single ordinary payment form.
+interface ShopkeeperPaymentOptions {
+  direction: PaymentDirection;
+  partyName: string;
+}
+
+function paymentForm(
+  partyType: PartyType,
+  partyId: number,
+  currentDue: number,
+  onSaved: () => void,
+  shopkeeper?: ShopkeeperPaymentOptions
+): HTMLElement {
   const methodSelect = el('select', {}, [
     el('option', { value: 'cash' }, ['Cash']),
     el('option', { value: 'online' }, ['Online']),
@@ -404,31 +420,30 @@ function paymentForm(partyType: PartyType, partyId: number, currentDue: number, 
   const amountInput = el('input', { type: 'number', step: '0.01', min: '0.01', placeholder: '0' }) as HTMLInputElement;
   const errorSlot = el('div', { class: 'form-error-slot' });
 
-  // Shopkeepers can end up owing the shop (after a sale), so a payment can
-  // go either way: you pay them, or they pay you. Defaults to whichever
-  // fits the current balance.
-  const isShopkeeper = partyType === 'shopkeeper';
-  const directionSelect = el('select', {}, [
-    el('option', { value: 'out' }, ['I paid them']),
-    el('option', { value: 'in' }, ['They paid me']),
-  ]) as HTMLSelectElement;
-  directionSelect.value = currentDue < 0 ? 'in' : 'out';
+  const isShopkeeper = partyType === 'shopkeeper' && shopkeeper !== undefined;
+  const direction: PaymentDirection = shopkeeper?.direction ?? 'out';
 
-  const hint = el('p', { class: 'field-hint' }, [
-    isShopkeeper
-      ? currentDue > 0
-        ? `You owe them ${formatRs(currentDue)}. Choose \u201cI paid them\u201d to reduce it.`
-        : currentDue < 0
-          ? `They owe you ${formatRs(Math.abs(currentDue))}. Choose \u201cThey paid me\u201d when they pay you.`
-          : 'Nothing is owed either way right now.'
-      : currentDue > 0
+  let hintText: string;
+  if (isShopkeeper && shopkeeper) {
+    const bal = formatShopkeeperBalance(currentDue);
+    const balanceLine =
+      bal.kind === 'clear'
+        ? 'Nothing is owed either way right now.'
+        : `Current balance: ${bal.text} ${bal.kind === 'credit' ? 'receivable' : 'payable'}.`;
+    hintText =
+      direction === 'out'
+        ? `Money you paid ${shopkeeper.partyName}. This increases what they owe you (receivable). ${balanceLine}`
+        : `Money ${shopkeeper.partyName} paid you. This increases what you owe them (payable). ${balanceLine}`;
+  } else {
+    hintText =
+      currentDue > 0
         ? `Current due is ${formatRs(currentDue)}. Entering an amount reduces it right away.`
-        : 'There is no outstanding due right now. A payment here will create a credit balance.',
-  ]);
+        : 'There is no outstanding due right now. A payment here will create a credit balance.';
+  }
+  const hint = el('p', { class: 'field-hint' }, [hintText]);
 
   const form = el('form', { class: 'inline-form' }, [
     el('div', { class: 'form-grid form-grid-tight' }, [
-      isShopkeeper ? el('label', {}, ['Direction', directionSelect]) : null,
       el('label', {}, ['Method', methodSelect]),
       el('label', {}, ['Date', dateInput]),
       el('label', {}, ['Amount (Rs.)', amountInput]),
@@ -462,7 +477,7 @@ function paymentForm(partyType: PartyType, partyId: number, currentDue: number, 
         note: 'Standalone payment',
         paymentMethod: methodSelect.value as 'online' | 'cash',
         paymentDate: dateInput.value,
-        direction: (isShopkeeper ? directionSelect.value : 'out') as PaymentDirection,
+        direction,
       });
       amountInput.value = '';
       onSaved();
@@ -681,7 +696,14 @@ function renderEntriesTable(
   render();
 }
 
-function paymentsTable(payments: Payment[]): HTMLElement {
+// Which side made a shopkeeper's payment, since a shopkeeper's payments go
+// both ways. Other party types have only one direction, so no note.
+function shopkeeperPayerNote(p: Payment, partyType?: PartyType): string {
+  if (partyType !== 'shopkeeper') return '';
+  return p.direction === 'in' ? ' \u00b7 paid by shopkeeper' : ' \u00b7 paid by us';
+}
+
+function paymentsTable(payments: Payment[], partyType?: PartyType): HTMLElement {
   if (payments.length === 0) {
     return emptyState('No payments recorded yet.');
   }
@@ -690,7 +712,7 @@ function paymentsTable(payments: Payment[]): HTMLElement {
     el('tr', {}, [
       el('td', {}, [formatDateTime(p.paid_at)]),
       el('td', { class: 'cell-muted' }, [
-        (p.payment_method ? methodLabel[p.payment_method] : '\u2014') + (p.direction === 'in' ? ' \u00b7 received' : ''),
+        (p.payment_method ? methodLabel[p.payment_method] : '\u2014') + shopkeeperPayerNote(p, partyType),
       ]),
       el('td', { class: 'cell-number cell-strong' }, [formatRs(p.amount)]),
       el('td', { class: 'cell-muted' }, [p.bill_id ? `Bill #${p.bill_id}` : p.note || 'Standalone']),
@@ -877,7 +899,7 @@ function renderPaymentsUnbilledTable(
         const confirmed = await confirmDialog(
           `Delete this ${payment.payment_method ? PAYMENT_METHOD_LABEL[payment.payment_method].toLowerCase() + ' ' : ''}payment of ${formatRs(payment.amount)}? ` +
             (payment.direction === 'in'
-            ? `That amount will go back onto what they owe you. This can\u2019t be undone.`
+            ? `The balance will be adjusted back. This can\u2019t be undone.`
             : `That amount will be added back to the due. This can\u2019t be undone.`),
           { confirmLabel: 'Delete', danger: true }
         );
@@ -898,7 +920,7 @@ function renderPaymentsUnbilledTable(
         el('td', {}, [formatDateTime(payment.paid_at)]),
         el('td', { class: 'cell-muted' }, [
           (payment.payment_method ? PAYMENT_METHOD_LABEL[payment.payment_method] : '\u2014') +
-            (payment.direction === 'in' ? ' \u00b7 received' : ''),
+            shopkeeperPayerNote(payment, partyType),
         ]),
         el('td', { class: 'cell-number cell-strong' }, [formatRs(payment.amount)]),
         el('td', { class: 'cell-actions' }, [el('div', { class: 'entry-edit-actions' }, [editBtn, deleteBtn]), rowErrorSlot]),
@@ -1145,6 +1167,9 @@ export async function renderPartyProfile(
   const generateBillWrap = el('div', {});
   const entryFormWrap = el('div', {});
   const paymentFormWrap = el('div', {});
+  // Shopkeepers: payment made by us / payment made by the shopkeeper.
+  const paymentByUsWrap = el('div', {});
+  const paymentByThemWrap = el('div', {});
   const deleteWrap = el('div', {});
 
   // Which unbilled entries/payments are checked for the next bill.
@@ -1202,7 +1227,7 @@ export async function renderPartyProfile(
       renderBillPanel,
       reload
     );
-    mount(paymentsWrap, paymentsTable(payments));
+    mount(paymentsWrap, paymentsTable(payments, partyType));
     mount(billsWrap, billsTable(bills, partyType));
     renderBillPanel();
     mount(deleteWrap, deletePartyControls(party, partyType));
@@ -1231,11 +1256,24 @@ export async function renderPartyProfile(
     refreshStatic();
     // Forms read party.current_due / entries at build time, so they're
     // rebuilt fresh on every reload rather than mutated in place.
-    paymentFormWrap.replaceChildren(paymentForm(partyType, partyId, party.current_due, reload));
+    buildPaymentForms();
     buildEntryForms();
   }
 
-  paymentFormWrap.replaceChildren(paymentForm(partyType, partyId, party.current_due, reload));
+  function buildPaymentForms() {
+    if (isShopkeeper) {
+      paymentByUsWrap.replaceChildren(
+        paymentForm(partyType, partyId, party.current_due, reload, { direction: 'out', partyName: party.name })
+      );
+      paymentByThemWrap.replaceChildren(
+        paymentForm(partyType, partyId, party.current_due, reload, { direction: 'in', partyName: party.name })
+      );
+    } else {
+      paymentFormWrap.replaceChildren(paymentForm(partyType, partyId, party.current_due, reload));
+    }
+  }
+
+  buildPaymentForms();
   buildEntryForms();
 
   refreshStatic();
@@ -1245,15 +1283,22 @@ export async function renderPartyProfile(
     el('div', { class: 'profile-header-row' }, [backLink(partyType), deleteWrap]),
     heroWrap,
     isShopkeeper
-      ? el('div', { class: 'profile-columns' }, [
+      ? // Top row: what raises the receivable (a sale, or money we paid them).
+        // Bottom row: what raises what we owe (a purchase, or money they paid us).
+        el('div', { class: 'profile-columns' }, [
           el('section', { class: 'panel' }, [el('h2', {}, ['Add Sale']), saleFormWrap]),
-          el('section', { class: 'panel' }, [el('h2', {}, ['Add Purchase']), entryFormWrap]),
+          el('section', { class: 'panel' }, [el('h2', {}, ['Payment Made by Us']), paymentByUsWrap]),
         ])
       : el('div', { class: 'profile-columns' }, [
           el('section', { class: 'panel' }, [el('h2', {}, [copy.entryVerb]), entryFormWrap]),
           el('section', { class: 'panel' }, [el('h2', {}, ['Make a Payment']), paymentFormWrap]),
         ]),
-    isShopkeeper ? el('section', { class: 'panel' }, [el('h2', {}, ['Make a Payment']), paymentFormWrap]) : null,
+    isShopkeeper
+      ? el('div', { class: 'profile-columns' }, [
+          el('section', { class: 'panel' }, [el('h2', {}, ['Add Purchase']), entryFormWrap]),
+          el('section', { class: 'panel' }, [el('h2', {}, [`Payment Made by ${party.name}`]), paymentByThemWrap]),
+        ])
+      : null,
     isShopkeeper
       ? el('section', { class: 'panel' }, [el('h2', {}, ['Sales (unbilled)']), salesWrap])
       : el('section', { class: 'panel' }, [el('h2', {}, [copy.addEntryLabel]), entriesWrap]),

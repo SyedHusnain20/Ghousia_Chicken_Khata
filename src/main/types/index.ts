@@ -221,5 +221,10 @@ export interface CounterSaleBill {
   customer_number: string | null;
   customer_label: string;
   total: number;
+  // How much of the total has been paid. Normally the full total; a smaller
+  // amount means the customer still owes the difference (remaining_due > 0)
+  // until the bill is marked paid.
+  paid_amount: number;
+  remaining_due: number;
   items: CounterSaleEntry[];
 }

@@ -1,14 +1,17 @@
 import { el, mount } from '../dom';
 import { formatDate, formatDateShort, formatDateTime, formatRs, todayIso } from '../format';
 import {
+  amountPromptDialog,
   button,
   confirmDialog,
   emptyState,
   errorBanner,
   errorMessage,
   itemSelect,
+  ipcErrorMessage,
   loadingState,
   pageHeader,
+  successBanner,
 } from '../components';
 import { navigate } from '../router';
 import { SHOP_NAME_EN, SHOP_NAME_UR } from '../shopConfig';
@@ -183,11 +186,28 @@ function currentBillPanel(entries: CounterSaleEntry[], onChanged: () => void): H
   wrap.append(errorSlot);
 
   if (entries.length > 0) {
+    const billTotal = floorMoney(entries.reduce((sum, e) => sum + e.line_total, 0));
     const generateBtn = button('Generate Bill', async () => {
       errorSlot.replaceChildren();
+      // Ask how much the customer paid. Full payment is pre-filled; if they
+      // haven't paid it all, the shortfall is tracked and the bill shows up
+      // in red until it's marked paid.
+      const paidAmount = await amountPromptDialog({
+        title: 'Payment received',
+        message: `Bill total: ${formatRs(billTotal)}. Change the amount if the customer hasn\u2019t paid in full.`,
+        label: 'Payment made (Rs.)',
+        defaultValue: billTotal,
+        max: billTotal,
+        confirmLabel: 'Generate Bill',
+      });
+      if (paidAmount === null) return;
+
       generateBtn.disabled = true;
       try {
-        const bill = await window.khata.generateCounterSaleBill({ entryIds: entries.map((e) => e.id) });
+        const bill = await window.khata.generateCounterSaleBill({
+          entryIds: entries.map((e) => e.id),
+          paidAmount,
+        });
         navigate(`/counter-sale/bill/${bill.id}`);
       } catch (err) {
         errorSlot.replaceChildren(errorBanner(errorMessage(err)));
@@ -202,25 +222,52 @@ function currentBillPanel(entries: CounterSaleEntry[], onChanged: () => void): H
 // The day's finished bills, at the very end of the page. Each shows who it
 // was for (the typed name, or Customer 1, 2, ... for unnamed ones), and every
 // item's KG, rate and total, plus the bill total.
-function billsForDate(bills: CounterSaleBill[], date: string): HTMLElement {
+function billsForDate(bills: CounterSaleBill[], date: string, onChanged: () => void): HTMLElement {
   if (bills.length === 0) {
     return emptyState(`No counter sale bills for ${formatDate(date)}.`);
   }
 
   const dayTotal = floorMoney(bills.reduce((sum, b) => sum + b.total, 0));
 
+  const outstanding = floorMoney(bills.reduce((sum, b) => sum + b.remaining_due, 0));
+
   const cards = bills.map((bill) => {
+    const unpaid = bill.remaining_due > 0;
     const viewBtn = button('View / Print', () => navigate(`/counter-sale/bill/${bill.id}`), 'secondary');
-    return el('div', { class: 'counter-bill-card' }, [
+    const errorSlot = el('div', { class: 'form-error-slot' });
+    // Unpaid bills get a "Paid" button: once the rest is collected the sale
+    // becomes an ordinary fully paid one and the red highlight goes away.
+    const paidBtn = button('Paid', async () => {
+          const ok = await confirmDialog(
+            `Mark ${bill.customer_label}\u2019s bill as fully paid? The remaining ${formatRs(bill.remaining_due)} will be treated as received.`,
+            { confirmLabel: 'Mark Paid' }
+          );
+          if (!ok) return;
+          paidBtn.disabled = true;
+          try {
+            await window.khata.markCounterSaleBillPaid({ billId: bill.id });
+            onChanged();
+          } catch (err) {
+            errorSlot.replaceChildren(errorBanner(errorMessage(err)));
+            paidBtn.disabled = false;
+          }
+        });
+    return el('div', { class: unpaid ? 'counter-bill-card counter-bill-unpaid' : 'counter-bill-card' }, [
       el('div', { class: 'counter-bill-head' }, [
         el('div', {}, [
           el('div', { class: 'counter-bill-name' }, [bill.customer_label]),
           el('div', { class: 'cell-muted' }, [
             `Bill #${bill.id} \u00b7 ${formatDateTime(bill.bill_date)}${bill.customer_number ? ` \u00b7 ${bill.customer_number}` : ''}`,
           ]),
+          unpaid
+            ? el('div', { class: 'counter-bill-owed' }, [
+                `Paid ${formatRs(bill.paid_amount)} \u00b7 Remaining ${formatRs(bill.remaining_due)}`,
+              ])
+            : null,
         ]),
-        viewBtn,
+        el('div', { class: 'counter-bill-buttons' }, [unpaid ? paidBtn : null, viewBtn]),
       ]),
+      errorSlot,
       el('table', { class: 'data-table' }, [
         el('thead', {}, [
           el('tr', {}, [
@@ -257,6 +304,7 @@ function billsForDate(bills: CounterSaleBill[], date: string): HTMLElement {
     el('div', { class: 'total-preview-row' }, [
       `Total counter sales on ${formatDate(date)}: `,
       el('span', { class: 'total-preview' }, [formatRs(dayTotal)]),
+      outstanding > 0 ? el('span', { class: 'counter-bill-owed' }, [`  \u00b7  Still to collect: ${formatRs(outstanding)}`]) : null,
     ]),
   ]);
 }
@@ -279,7 +327,7 @@ export async function renderCounterSale(date: string, container: HTMLElement): P
         window.khata.listCounterSaleBills({ date }),
       ]);
       mount(pendingWrap, currentBillPanel(pending, load));
-      mount(billsWrap, billsForDate(bills, date));
+      mount(billsWrap, billsForDate(bills, date, load));
     } catch (err) {
       mount(pendingWrap, errorBanner(errorMessage(err)));
     }
@@ -322,6 +370,62 @@ export async function renderCounterSaleBill(billId: number, container: HTMLEleme
   ]);
   const printBtn = button('Print bill', () => window.print());
 
+  const statusSlot = el('div', { class: 'form-error-slot no-print' });
+
+  const shareBtn = button('Share to WhatsApp', async () => {
+    statusSlot.replaceChildren();
+    shareBtn.disabled = true;
+    const originalLabel = shareBtn.textContent;
+    shareBtn.textContent = 'Preparing image\u2026';
+    try {
+      const result = await window.khata.shareCounterSaleBillImage({ billId: bill.id });
+      statusSlot.replaceChildren(
+        successBanner(
+          result.whatsappUrl
+            ? `Bill image copied and WhatsApp opened for ${bill.customer_label}. Press Ctrl+V in the chat, then Send.`
+            : `Bill image copied to clipboard. Open WhatsApp, pick the customer\u2019s chat (no phone number on this bill to auto-open it), and press Ctrl+V, then Send.`
+        )
+      );
+    } catch (err) {
+      statusSlot.replaceChildren(errorBanner(errorMessage(err)));
+    } finally {
+      shareBtn.disabled = false;
+      shareBtn.textContent = originalLabel;
+    }
+  }, 'secondary');
+
+  const restoreBtn = button('Restore bill', async () => {
+    statusSlot.replaceChildren();
+    const confirmed = await confirmDialog(
+      `Restore Counter Sale Bill #${bill.id} (${bill.customer_label})?\n\n` +
+        `Its ${bill.items.length} item${bill.items.length === 1 ? '' : 's'} will go back to the Current Bill list, ` +
+        `with their original dates and amounts, and this bill will be deleted.\n\n` +
+        `You can then remove items or add more and generate a new bill. Any copy of this bill that was ` +
+        `already printed or sent on WhatsApp will no longer match your records.`,
+      { confirmLabel: 'Restore & Delete Bill', danger: true }
+    );
+    if (!confirmed) return;
+
+    restoreBtn.disabled = true;
+    try {
+      const result = await window.khata.restoreCounterSaleBill({ billId: bill.id });
+      mount(
+        container,
+        el('div', { class: 'page-header' }, [el('h1', {}, ['Bill restored'])]),
+        successBanner(
+          `Bill #${bill.id} was deleted. Its ${result.entriesRestored} item${result.entriesRestored === 1 ? ' is' : 's are'} ` +
+            `back in the Current Bill list, with their original dates and amounts.`
+        ),
+        el('div', { class: 'form-actions' }, [
+          button('Go to Counter Sale', () => navigate(`/counter-sale/${billDay}`)),
+        ])
+      );
+    } catch (err) {
+      statusSlot.replaceChildren(errorBanner(ipcErrorMessage(err)));
+      restoreBtn.disabled = false;
+    }
+  }, 'danger');
+
   const itemRows = bill.items.map((item) =>
     el('tr', {}, [
       el('td', {}, [formatDateShort(item.entry_date)]),
@@ -363,6 +467,17 @@ export async function renderCounterSaleBill(billId: number, container: HTMLEleme
         el('span', {}, ['Total']),
         el('span', {}, [formatRs(bill.total)]),
       ]),
+      // Only while something is still owed; once marked paid the bill reads
+      // like any other fully paid sale.
+      bill.remaining_due > 0
+        ? el('div', { class: 'receipt-total-row' }, [el('span', {}, ['Paid']), el('span', {}, [formatRs(bill.paid_amount)])])
+        : null,
+      bill.remaining_due > 0
+        ? el('div', { class: 'receipt-total-row receipt-total-grand receipt-balance-payable' }, [
+            el('span', {}, ['Remaining']),
+            el('span', {}, [formatRs(bill.remaining_due)]),
+          ])
+        : null,
     ]),
     el('div', { class: 'receipt-footer' }, [
       el('div', {}, ['Powered by R&R Digital Solutions']),
@@ -376,8 +491,9 @@ export async function renderCounterSaleBill(billId: number, container: HTMLEleme
     el('div', { class: 'no-print' }, [backLink]),
     el('div', { class: 'page-header no-print' }, [
       el('h1', {}, ['Counter Sale Bill']),
-      el('div', { class: 'page-header-actions' }, [printBtn]),
+      el('div', { class: 'page-header-actions' }, [printBtn, shareBtn, restoreBtn]),
     ]),
+    statusSlot,
     receipt
   );
 }

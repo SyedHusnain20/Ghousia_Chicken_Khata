@@ -28,7 +28,10 @@ import {
   generateCounterSaleBill,
   listCounterSaleBillsForDate,
   getCounterSaleBill,
+  markCounterSaleBillPaid,
+  restoreCounterSaleBill,
 } from '../src/main/services/counterSaleService';
+import { buildBillHtml, buildCounterSaleBillHtml } from '../src/main/reports/billImageShare';
 import { summarizeShopkeeperBill, shopkeeperBalance } from '../src/shared/shopkeeperBill';
 
 function eq(label: string, actual: unknown, expected: unknown) {
@@ -143,6 +146,33 @@ eq('counter sales never touch the ledger or the Bills list',
   JSON.stringify([getDailyLedger(db, D), listAllBills(db)]) === before, true);
 eq('...nor monthly/history totals', listDailyLedgers(db).map((l) => [l.total_income, l.total_expenses]), [[5500, 5000]]);
 
+console.log('\n--- Counter sale: partial payment, mark paid, restore ---');
+addCounterSaleEntry(db, { customerName: 'Hina', itemName: 'Chicken', weightKg: 5, ratePerKg: 400, entryDate: D }); // 2000
+rejects('cannot pay more than the total', () => generateCounterSaleBill(db, undefined, 2500));
+eq('failed attempt left the item pending', listPendingCounterSaleEntries(db).length, 1);
+rejects('cannot pay a negative amount', () => generateCounterSaleBill(db, undefined, -5));
+const part = generateCounterSaleBill(db, undefined, 500);
+eq('partial payment: paid 500, remaining 1500', [part.paid_amount, part.remaining_due], [500, 1500]);
+eq('a default bill is fully paid', listCounterSaleBillsForDate(db, D)[0].remaining_due, 0);
+const html = buildCounterSaleBillHtml(part);
+eq('image shows paid + remaining for an unpaid bill', html.includes('Remaining') && html.includes('Rs. 1,500'), true);
+eq('image has no Remaining row on a fully paid bill', buildCounterSaleBillHtml(getCounterSaleBill(db, cs1.id)).includes('Remaining'), false);
+const settled = markCounterSaleBillPaid(db, part.id);
+eq('marking paid clears the balance', [settled.paid_amount, settled.remaining_due], [2000, 0]);
+const restored = restoreCounterSaleBill(db, settled.id);
+eq('restore returns the items to pending', [restored.entriesRestored, listPendingCounterSaleEntries(db).length], [1, 1]);
+rejects('restored bill no longer exists', () => getCounterSaleBill(db, settled.id));
+eq('restore removed it from the day list', listCounterSaleBillsForDate(db, D).some((b) => b.id === settled.id), false);
+eq('counter sales still never touch the ledger/Bills list', JSON.stringify([getDailyLedger(db, D), listAllBills(db)]) === before, true);
+
+console.log('\n--- Shopkeeper bill names who paid ---');
+const skHtml = buildBillHtml(detail);
+eq("their payment reads '<shopkeeper> paid'", skHtml.includes('Raza Shop paid'), true);
+const k2 = createParty(db, 'shopkeeper', 'Imran', null, 0);
+addEntry(db, 'shopkeeper', k2, 'Chicken', 1, 100, D);
+recordPayment(db, 'shopkeeper', k2, 40, null, null, 'cash', D, 'out');
+eq("our payment reads '<owner> paid'", buildBillHtml(getBillById(db, 'shopkeeper', generateBill(db, 'shopkeeper', k2).id)).includes('Zafar paid'), true);
+
 console.log('\n--- Migration: an old database gains the new columns, keeping its data ---');
 {
   const fs = require('fs');
@@ -158,6 +188,8 @@ console.log('\n--- Migration: an old database gains the new columns, keeping its
     CREATE TABLE shopkeeper_bills (id INTEGER PRIMARY KEY AUTOINCREMENT, shopkeeper_id INTEGER NOT NULL, bill_date TEXT NOT NULL DEFAULT (datetime('now')), previous_due REAL NOT NULL, subtotal REAL NOT NULL, total_due_after_bill REAL NOT NULL, remaining_due REAL NOT NULL);
     CREATE TABLE shopkeeper_entries (id INTEGER PRIMARY KEY AUTOINCREMENT, shopkeeper_id INTEGER NOT NULL, entry_date TEXT NOT NULL, item_name TEXT NOT NULL DEFAULT 'Chicken', weight_kg REAL NOT NULL, rate_per_kg REAL NOT NULL, line_total REAL NOT NULL, bill_id INTEGER);
     CREATE TABLE payments (id INTEGER PRIMARY KEY AUTOINCREMENT, party_type TEXT NOT NULL CHECK (party_type IN ('supplier','customer')), party_id INTEGER NOT NULL, bill_id INTEGER, amount REAL NOT NULL, payment_method TEXT, paid_at TEXT NOT NULL DEFAULT (datetime('now')), note TEXT);
+    CREATE TABLE counter_sale_bills (id INTEGER PRIMARY KEY AUTOINCREMENT, bill_date TEXT NOT NULL, customer_name TEXT, customer_number TEXT, total REAL NOT NULL);
+    INSERT INTO counter_sale_bills (bill_date, total) VALUES ('2026-01-01 10:00:00', 700);
     INSERT INTO shopkeepers (name, current_due) VALUES ('Old Shop', 150);
     INSERT INTO shopkeeper_entries (shopkeeper_id, entry_date, weight_kg, rate_per_kg, line_total) VALUES (1,'2026-01-01 10:00:00',2,100,200);
     INSERT INTO payments (party_type, party_id, amount) VALUES ('supplier',1,50);
@@ -169,6 +201,7 @@ console.log('\n--- Migration: an old database gains the new columns, keeping its
   eq('old shopkeeper entry becomes a purchase', oldEntry.entry_type, 'purchase');
   const oldPay = migrated.prepare('SELECT * FROM payments').get() as any;
   eq('old payment becomes an outbound payment', oldPay.direction, 'out');
+  eq('older counter-sale bills become fully paid', (migrated.prepare('SELECT paid_amount FROM counter_sale_bills').get() as any).paid_amount, 700);
   eq('old balance untouched', getParty(migrated, 'shopkeeper', 1).current_due, 150);
   addEntry(migrated, 'shopkeeper', 1, 'Live', 1, 100, '2026-01-02', false, 'sale');
   eq('new sale works on the migrated database', getParty(migrated, 'shopkeeper', 1).current_due, 50);

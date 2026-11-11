@@ -127,3 +127,76 @@ export function itemSelect(selected?: string): HTMLSelectElement {
   select.value = selected && options.includes(selected) ? selected : options[0];
   return select;
 }
+
+/**
+ * A small popup asking for one amount, pre-filled with `defaultValue`.
+ * Resolves with the entered number, or null if cancelled. `max` (if given)
+ * is enforced - the popup shows the problem and stays open instead of
+ * closing on a bad value.
+ */
+export function amountPromptDialog(options: {
+  title: string;
+  message?: string;
+  label: string;
+  defaultValue: number;
+  max?: number;
+  confirmLabel?: string;
+}): Promise<number | null> {
+  const { title, message, label, defaultValue, max, confirmLabel = 'OK' } = options;
+
+  return new Promise((resolve) => {
+    const input = el('input', {
+      type: 'number',
+      step: '1',
+      min: '0',
+      value: String(defaultValue),
+    }) as HTMLInputElement;
+    const errorSlot = el('div', { class: 'form-error-slot' });
+    const confirmBtn = el('button', { class: 'btn btn-primary btn-small', type: 'button' }, [confirmLabel]) as HTMLButtonElement;
+    const cancelBtn = el('button', { class: 'btn btn-secondary btn-small', type: 'button' }, ['Cancel']) as HTMLButtonElement;
+
+    const box = el('div', { class: 'modal-box', role: 'dialog', 'aria-modal': 'true' }, [
+      el('h3', {}, [title]),
+      message ? el('p', { class: 'modal-message' }, [message]) : null,
+      el('label', {}, [label, input]),
+      errorSlot,
+      el('div', { class: 'form-actions' }, [confirmBtn, cancelBtn]),
+    ]);
+    const overlay = el('div', { class: 'modal-overlay' }, [box]);
+
+    function close(result: number | null): void {
+      document.removeEventListener('keydown', onKeydown);
+      overlay.remove();
+      resolve(result);
+    }
+
+    function submit(): void {
+      const value = Number(input.value);
+      if (input.value.trim() === '' || !Number.isFinite(value) || value < 0) {
+        errorSlot.replaceChildren(errorBanner('Enter an amount of zero or more.'));
+        return;
+      }
+      if (max !== undefined && value > max) {
+        errorSlot.replaceChildren(errorBanner(`The amount can't be more than ${max}.`));
+        return;
+      }
+      close(value);
+    }
+
+    function onKeydown(e: KeyboardEvent): void {
+      if (e.key === 'Escape') close(null);
+      else if (e.key === 'Enter') submit();
+    }
+
+    confirmBtn.addEventListener('click', submit);
+    cancelBtn.addEventListener('click', () => close(null));
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) close(null);
+    });
+    document.addEventListener('keydown', onKeydown);
+
+    document.body.append(overlay);
+    input.focus();
+    input.select();
+  });
+}
